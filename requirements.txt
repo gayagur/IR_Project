@@ -1,0 +1,7 @@
+flask
+numpy
+pandas
+pyarrow
+mwparserfromhell
+google-cloud-storage
+requests
