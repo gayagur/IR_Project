@@ -1,4 +1,4 @@
-הנה הטקסט בפורמט **Markdown** מוכן להעתקה והדבקה לתוך הקובץ `README.md` בגיטהאב שלך:
+:
 
 ```markdown
 # 🔍 Wikipedia Search Engine
