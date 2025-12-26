@@ -1,6 +1,4 @@
-:
 
-```markdown
 # 🔍 Wikipedia Search Engine
 > **Information Retrieval Course Project** | A high-performance full-text search engine for English Wikipedia.
 
