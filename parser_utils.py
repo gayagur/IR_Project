@@ -174,15 +174,21 @@ def _list_gcs_parquet_files(gcs_path: str) -> List[str]:
     return parquet_files
 
 
-def _iter_parquet_batches(local_parquet_file: str, *, batch_size: int = 10_000):
-    """Yield record batches from a local parquet file with minimal RAM use."""
+def _iter_parquet_batches(local_parquet_file: str, *, batch_size: int = 10_000, columns: Optional[List[str]] = None):
+    """Yield record batches from a local parquet file with minimal RAM use.
+    
+    Args:
+        local_parquet_file: Path to local parquet file
+        batch_size: Number of rows per batch
+        columns: Optional list of column names to read (more efficient if specified)
+    """
     if HAS_PYARROW:
         pf = pq.ParquetFile(local_parquet_file)
-        for batch in pf.iter_batches(batch_size=batch_size):
+        for batch in pf.iter_batches(batch_size=batch_size, columns=columns):
             yield batch
     elif HAS_PANDAS:
         # Fallback: loads whole file into memory (only suitable for small dev tests)
-        df = pd.read_parquet(local_parquet_file, engine="pyarrow" if HAS_PYARROW else "auto")
+        df = pd.read_parquet(local_parquet_file, engine="pyarrow" if HAS_PYARROW else "auto", columns=columns)
         yield df
     else:
         raise ImportError("Need either pyarrow (preferred) or pandas to read parquet.")
@@ -249,7 +255,6 @@ def page_iter_parquet(parquet_path: str) -> Generator[PageTuple, None, None]:
 
             if HAS_PYARROW:
                 pf = pq.ParquetFile(local_file)
-                schema_names = [n.lower() for n in pf.schema.names]
                 # Find columns by common names
                 for name in pf.schema.names:
                     nl = name.lower()
@@ -264,10 +269,18 @@ def page_iter_parquet(parquet_path: str) -> Generator[PageTuple, None, None]:
                     # Can't process this file
                     continue
 
-                for batch in pf.iter_batches(batch_size=10_000, columns=[id_col, title_col, body_col]):
-                    doc_ids = batch.column(0).to_pylist()
-                    titles = batch.column(1).to_pylist()
-                    bodies = batch.column(2).to_pylist()
+                # Use _iter_parquet_batches for efficient batch processing with column selection
+                for batch in _iter_parquet_batches(local_file, batch_size=10_000, columns=[id_col, title_col, body_col]):
+                    # Extract columns from batch
+                    if HAS_PYARROW and hasattr(batch, 'column'):  # PyArrow RecordBatch
+                        doc_ids = batch.column(0).to_pylist()
+                        titles = batch.column(1).to_pylist()
+                        bodies = batch.column(2).to_pylist()
+                    else:  # Pandas DataFrame fallback
+                        doc_ids = batch[id_col].tolist()
+                        titles = batch[title_col].tolist()
+                        bodies = batch[body_col].tolist()
+                    
                     for doc_id, title, body in zip(doc_ids, titles, bodies):
                         if doc_id is None or title is None or body is None:
                             continue
