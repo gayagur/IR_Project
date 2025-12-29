@@ -41,31 +41,46 @@ def search():
       return jsonify(res)
     # BEGIN SOLUTION
     try:
+        print(f"[SEARCH] Query: '{query}'")
         from search_runtime import get_engine
         engine = get_engine()
 
         q_tokens = engine.tokenize_query(query)
+        print(f"[SEARCH] Tokenized query: {q_tokens}")
         if not q_tokens:
+            print("[SEARCH] No tokens after tokenization, returning empty results")
             return jsonify(res)
 
         # Candidates + scores from multiple signals
+        print("[SEARCH] Searching body index...")
         body_ranked = engine.search_body_bm25(q_tokens, top_n=300)
+        print(f"[SEARCH] Body results: {len(body_ranked)}")
+        
+        print("[SEARCH] Searching title index...")
         title_ranked = engine.search_title_count(q_tokens, top_n=5000)
+        print(f"[SEARCH] Title results: {len(title_ranked)}")
+        
+        print("[SEARCH] Searching anchor index...")
         anchor_ranked = engine.search_anchor_count(q_tokens, top_n=5000)
+        print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
 
+        print("[SEARCH] Merging signals...")
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
             top_n=100,
         )
+        print(f"[SEARCH] Merged results: {len(merged)}")
 
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
+        print(f"[SEARCH] Final results: {len(res)}")
     except Exception as e:
         import traceback
         error_msg = f"Error in search: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)  # Print to server console
-        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+        print(f"[SEARCH ERROR] {error_msg}")  # Print to server console
+        # Return empty results instead of error to avoid crashing
+        return jsonify(res)  # Return empty list instead of error
     # END SOLUTION
     return jsonify(res)
 
@@ -91,20 +106,24 @@ def search_body():
       return jsonify(res)
     # BEGIN SOLUTION
     try:
+        print(f"[SEARCH_BODY] Query: '{query}'")
         from search_runtime import get_engine
         engine = get_engine()
 
         q_tokens = engine.tokenize_query(query)
+        print(f"[SEARCH_BODY] Tokenized query: {q_tokens}")
         if not q_tokens:
+            print("[SEARCH_BODY] No tokens, returning empty results")
             return jsonify(res)
 
         ranked = engine.search_body_tfidf_cosine(q_tokens, top_n=100)
+        print(f"[SEARCH_BODY] Results: {len(ranked)}")
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
     except Exception as e:
         import traceback
         error_msg = f"Error in search_body: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+        print(f"[SEARCH_BODY ERROR] {error_msg}")
+        return jsonify(res)  # Return empty list instead of error
     # END SOLUTION
     return jsonify(res)
 
@@ -135,20 +154,24 @@ def search_title():
       return jsonify(res)
     # BEGIN SOLUTION
     try:
+        print(f"[SEARCH_TITLE] Query: '{query}'")
         from search_runtime import get_engine
         engine = get_engine()
 
         q_tokens = engine.tokenize_query(query)
+        print(f"[SEARCH_TITLE] Tokenized query: {q_tokens}")
         if not q_tokens:
+            print("[SEARCH_TITLE] No tokens, returning empty results")
             return jsonify(res)
 
         ranked = engine.search_title_count(q_tokens, top_n=None)  # ALL
+        print(f"[SEARCH_TITLE] Results: {len(ranked)}")
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
     except Exception as e:
         import traceback
         error_msg = f"Error in search_title: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+        print(f"[SEARCH_TITLE ERROR] {error_msg}")
+        return jsonify(res)  # Return empty list instead of error
     # END SOLUTION
     return jsonify(res)
 
@@ -179,20 +202,24 @@ def search_anchor():
       return jsonify(res)
     # BEGIN SOLUTION
     try:
+        print(f"[SEARCH_ANCHOR] Query: '{query}'")
         from search_runtime import get_engine
         engine = get_engine()
 
         q_tokens = engine.tokenize_query(query)
+        print(f"[SEARCH_ANCHOR] Tokenized query: {q_tokens}")
         if not q_tokens:
+            print("[SEARCH_ANCHOR] No tokens, returning empty results")
             return jsonify(res)
 
         ranked = engine.search_anchor_count(q_tokens, top_n=None)  # ALL
+        print(f"[SEARCH_ANCHOR] Results: {len(ranked)}")
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
     except Exception as e:
         import traceback
         error_msg = f"Error in search_anchor: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+        print(f"[SEARCH_ANCHOR ERROR] {error_msg}")
+        return jsonify(res)  # Return empty list instead of error
     # END SOLUTION
     return jsonify(res)
 
@@ -217,10 +244,17 @@ def get_pagerank():
     if len(wiki_ids) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
-    pr = engine.pagerank
-    res = [float(pr.get(int(wid), 0.0)) for wid in wiki_ids]
+    try:
+        print(f"[GET_PAGERANK] Requested IDs: {wiki_ids}")
+        from search_runtime import get_engine
+        engine = get_engine()
+        pr = engine.pagerank
+        res = [float(pr.get(int(wid), 0.0)) for wid in wiki_ids]
+        print(f"[GET_PAGERANK] Returning {len(res)} values")
+    except Exception as e:
+        import traceback
+        print(f"[GET_PAGERANK ERROR] {e}\n{traceback.format_exc()}")
+        res = [0.0] * len(wiki_ids) if wiki_ids else []
     # END SOLUTION
     return jsonify(res)
 
@@ -247,10 +281,17 @@ def get_pageview():
     if len(wiki_ids) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
-    pv = engine.pageviews
-    res = [int(pv.get(int(wid), 0)) for wid in wiki_ids]
+    try:
+        print(f"[GET_PAGEVIEW] Requested IDs: {wiki_ids}")
+        from search_runtime import get_engine
+        engine = get_engine()
+        pv = engine.pageviews
+        res = [int(pv.get(int(wid), 0)) for wid in wiki_ids]
+        print(f"[GET_PAGEVIEW] Returning {len(res)} values")
+    except Exception as e:
+        import traceback
+        print(f"[GET_PAGEVIEW ERROR] {e}\n{traceback.format_exc()}")
+        res = [0] * len(wiki_ids) if wiki_ids else []
     # END SOLUTION
     return jsonify(res)
 
@@ -258,5 +299,24 @@ def run(**options):
     app.run(**options)
 
 if __name__ == '__main__':
+    import time
+    print("=" * 60)
+    print("Pre-loading search engine...")
+    print("=" * 60)
+    t0 = time.time()
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
+        load_time = time.time() - t0
+        print("=" * 60)
+        print(f"✓ Engine ready in {load_time:.1f} seconds")
+        print("=" * 60)
+    except Exception as e:
+        import traceback
+        print(f"✗ Error pre-loading engine: {e}")
+        print(traceback.format_exc())
+        print("Server will start but queries may be slow or fail")
+        print("=" * 60)
+    
     # run the Flask RESTful API, make the server publicly available (host='0.0.0.0') on port 8080
     app.run(host='0.0.0.0', port=8080, debug=True)

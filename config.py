@@ -35,35 +35,38 @@ WRITE_TO_GCS =  False
 
 # Set READ_FROM_GCS = True to read all indices and auxiliary files from GCS at runtime.
 # This is useful when running the server on a local machine but indices are stored in GCS.
-READ_FROM_GCS = True
+READ_FROM_GCS = False
 
-# When WRITE_TO_GCS=True, we use bucket-relative paths (NO 'gs://...' prefix) because inverted_index_gcp.py
-# opens blobs relative to bucket root.
+# When WRITE_TO_GCS=True or READ_FROM_GCS=True, we use bucket-relative paths (NO 'gs://...' prefix) 
+# because inverted_index_gcp.py opens blobs relative to bucket root.
 GCS_INDICES_DIR = "indices"
 GCS_AUX_DIR = "aux"
 
+# Determine if we should use GCS paths (either for writing OR reading from GCS)
+USE_GCS_PATHS = WRITE_TO_GCS or READ_FROM_GCS
+
 # Index directories
-BODY_INDEX_DIR = (GCS_INDICES_DIR + "/body") if WRITE_TO_GCS else (INDICES_DIR / "body")
-TITLE_INDEX_DIR = (GCS_INDICES_DIR + "/title") if WRITE_TO_GCS else (INDICES_DIR / "title")
-ANCHOR_INDEX_DIR = (GCS_INDICES_DIR + "/anchor") if WRITE_TO_GCS else (INDICES_DIR / "anchor")
+BODY_INDEX_DIR = (GCS_INDICES_DIR + "/body") if USE_GCS_PATHS else (INDICES_DIR / "body")
+TITLE_INDEX_DIR = (GCS_INDICES_DIR + "/title") if USE_GCS_PATHS else (INDICES_DIR / "title")
+ANCHOR_INDEX_DIR = (GCS_INDICES_DIR + "/anchor") if USE_GCS_PATHS else (INDICES_DIR / "anchor")
 
 # Auxiliary file paths
-DOC_NORMS_PATH = (GCS_AUX_DIR + "/doc_norms.pkl") if WRITE_TO_GCS else (AUX_DIR / "doc_norms.pkl")
-DOC_LEN_PATH = (GCS_AUX_DIR + "/doc_len.pkl") if WRITE_TO_GCS else (AUX_DIR / "doc_len.pkl")
-AVGDL_PATH = (GCS_AUX_DIR + "/avgdl.txt") if WRITE_TO_GCS else (AUX_DIR / "avgdl.txt")
-TITLES_PATH = (GCS_AUX_DIR + "/titles.pkl") if WRITE_TO_GCS else (AUX_DIR / "titles.pkl")
+DOC_NORMS_PATH = (GCS_AUX_DIR + "/doc_norms.pkl") if USE_GCS_PATHS else (AUX_DIR / "doc_norms.pkl")
+DOC_LEN_PATH = (GCS_AUX_DIR + "/doc_len.pkl") if USE_GCS_PATHS else (AUX_DIR / "doc_len.pkl")
+AVGDL_PATH = (GCS_AUX_DIR + "/avgdl.txt") if USE_GCS_PATHS else (AUX_DIR / "avgdl.txt")
+TITLES_PATH = (GCS_AUX_DIR + "/titles.pkl") if USE_GCS_PATHS else (AUX_DIR / "titles.pkl")
 
-PAGERANK_PATH = (GCS_AUX_DIR + "/pagerank.pkl") if WRITE_TO_GCS else (AUX_DIR / "pagerank.pkl")
-PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if WRITE_TO_GCS else (AUX_DIR / "pageviews.pkl")
+PAGERANK_PATH = (GCS_AUX_DIR + "/pagerank.pkl") if USE_GCS_PATHS else (AUX_DIR / "pagerank.pkl")
+PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if USE_GCS_PATHS else (AUX_DIR / "pageviews.pkl")
 
 # ============================================================================
 # LSI configuration (optional)
 # ============================================================================
-LSI_DIR = (GCS_AUX_DIR + "/lsi") if WRITE_TO_GCS else (AUX_DIR / "lsi")
-LSI_VECTORS_PATH = (LSI_DIR + "/lsi_vectors.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "lsi_vectors.pkl")
-LSI_SVD_COMPONENTS_PATH = (LSI_DIR + "/svd_components.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "svd_components.pkl")
-TERM_TO_IDX_PATH = (LSI_DIR + "/term_to_idx.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "term_to_idx.pkl")
-DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "doc_to_idx.pkl")
+LSI_DIR = (GCS_AUX_DIR + "/lsi") if USE_GCS_PATHS else (AUX_DIR / "lsi")
+LSI_VECTORS_PATH = (LSI_DIR + "/lsi_vectors.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "lsi_vectors.pkl")
+LSI_SVD_COMPONENTS_PATH = (LSI_DIR + "/svd_components.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "svd_components.pkl")
+TERM_TO_IDX_PATH = (LSI_DIR + "/term_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "term_to_idx.pkl")
+DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "doc_to_idx.pkl")
 
 LSI_N_COMPONENTS = 100
 LSI_MAX_TERMS = 50000

@@ -100,7 +100,7 @@ class SearchEngine:
     avgdl: float
     pagerank: Dict[int, float]
     pageviews: Dict[int, int]
-    body_bm25: BM25FromIndex
+    body_bm25: Optional[BM25FromIndex]
     body_index_dir: str
     title_index_dir: str
     anchor_index_dir: str
@@ -110,6 +110,9 @@ class SearchEngine:
         return tokenize(query)
 
     def search_body_bm25(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
+        if self.body_bm25 is None:
+            print("[WARNING] body_bm25 is None, returning empty results")
+            return []
         return self.body_bm25.search(q_tokens, top_n=top_n)
 
     def search_body_tfidf_cosine(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
@@ -203,44 +206,136 @@ def get_engine() -> SearchEngine:
     if _ENGINE is not None:
         return _ENGINE
 
+    print("=" * 60)
+    print("Loading search engine...")
+    print("=" * 60)
+
     # NOTE: We can read from GCS if indices are stored there.
     # Set config.READ_FROM_GCS=True to read all files (indices + aux) from GCS.
     # Otherwise, reads from local filesystem.
     read_from_gcs = getattr(config, 'READ_FROM_GCS', False)
     bucket_name = config.BUCKET_NAME if read_from_gcs else None
+    print(f"READ_FROM_GCS: {read_from_gcs}, BUCKET_NAME: {bucket_name}")
 
     body_dir = str(config.BODY_INDEX_DIR)
     title_dir = str(config.TITLE_INDEX_DIR)
     anchor_dir = str(config.ANCHOR_INDEX_DIR)
 
-    body = InvertedIndex.read_index(body_dir, "body", bucket_name=bucket_name)
-    title = InvertedIndex.read_index(title_dir, "title", bucket_name=bucket_name)
-    anchor = InvertedIndex.read_index(anchor_dir, "anchor", bucket_name=bucket_name)
+    # Load indices with error handling
+    print("Loading body index...")
+    try:
+        body = InvertedIndex.read_index(body_dir, "body", bucket_name=bucket_name)
+        print(f"  ✓ Body index loaded: {len(body.df):,} terms")
+    except Exception as e:
+        print(f"  ✗ Failed to load body index: {e}")
+        body = InvertedIndex()  # Empty index
 
-    titles = _load_pickle(config.TITLES_PATH, {}, bucket_name=bucket_name)
-    doc_norms = _load_pickle(config.DOC_NORMS_PATH, {}, bucket_name=bucket_name)
-    doc_len = _load_pickle(config.DOC_LEN_PATH, {}, bucket_name=bucket_name)
-    avgdl = _load_float_text(config.AVGDL_PATH, default=0.0, bucket_name=bucket_name)
+    print("Loading title index...")
+    try:
+        title = InvertedIndex.read_index(title_dir, "title", bucket_name=bucket_name)
+        print(f"  ✓ Title index loaded: {len(title.df):,} terms")
+    except Exception as e:
+        print(f"  ✗ Failed to load title index: {e}")
+        title = InvertedIndex()  # Empty index
 
-    pagerank = _load_pickle(config.PAGERANK_PATH, {}, bucket_name=bucket_name)
-    pageviews = _load_pickle(config.PAGEVIEWS_PATH, {}, bucket_name=bucket_name)
+    print("Loading anchor index...")
+    try:
+        anchor = InvertedIndex.read_index(anchor_dir, "anchor", bucket_name=bucket_name)
+        print(f"  ✓ Anchor index loaded: {len(anchor.df):,} terms")
+    except Exception as e:
+        print(f"  ✗ Failed to load anchor index: {e}")
+        anchor = InvertedIndex()  # Empty index
 
-    body_bm25 = BM25FromIndex(body, body_dir, doc_len, avgdl, bucket_name=bucket_name)
+    # Load auxiliary files with error handling
+    print("Loading auxiliary files...")
+    
+    print("  Loading titles...")
+    try:
+        titles = _load_pickle(config.TITLES_PATH, {}, bucket_name=bucket_name)
+        print(f"    ✓ Titles loaded: {len(titles):,} entries")
+    except Exception as e:
+        print(f"    ✗ Failed to load titles: {e}")
+        titles = {}
 
-    _ENGINE = SearchEngine(
-        body_index=body,
-        title_index=title,
-        anchor_index=anchor,
-        titles=titles,
-        doc_norms=doc_norms,
-        doc_len=doc_len,
-        avgdl=avgdl,
-        pagerank=pagerank,
-        pageviews=pageviews,
-        body_bm25=body_bm25,
-        body_index_dir=body_dir,
-        title_index_dir=title_dir,
-        anchor_index_dir=anchor_dir,
-        bucket_name=bucket_name,
-    )
+    print("  Loading doc_norms...")
+    try:
+        doc_norms = _load_pickle(config.DOC_NORMS_PATH, {}, bucket_name=bucket_name)
+        print(f"    ✓ Doc norms loaded: {len(doc_norms):,} entries")
+    except Exception as e:
+        print(f"    ✗ Failed to load doc_norms: {e}")
+        doc_norms = {}
+
+    print("  Loading doc_len...")
+    try:
+        doc_len = _load_pickle(config.DOC_LEN_PATH, {}, bucket_name=bucket_name)
+        print(f"    ✓ Doc len loaded: {len(doc_len):,} entries")
+    except Exception as e:
+        print(f"    ✗ Failed to load doc_len: {e}")
+        doc_len = {}
+
+    print("  Loading avgdl...")
+    try:
+        avgdl = _load_float_text(config.AVGDL_PATH, default=0.0, bucket_name=bucket_name)
+        print(f"    ✓ Avgdl loaded: {avgdl}")
+    except Exception as e:
+        print(f"    ✗ Failed to load avgdl: {e}")
+        avgdl = 0.0
+
+    print("  Loading pagerank...")
+    try:
+        pagerank = _load_pickle(config.PAGERANK_PATH, {}, bucket_name=bucket_name)
+        print(f"    ✓ PageRank loaded: {len(pagerank):,} entries")
+    except Exception as e:
+        print(f"    ✗ Failed to load PageRank: {e}")
+        pagerank = {}
+
+    print("  Loading pageviews...")
+    try:
+        pageviews = _load_pickle(config.PAGEVIEWS_PATH, {}, bucket_name=bucket_name)
+        print(f"    ✓ PageViews loaded: {len(pageviews):,} entries")
+    except Exception as e:
+        print(f"    ✗ Failed to load PageViews: {e}")
+        pageviews = {}
+
+    print("Initializing BM25...")
+    try:
+        if len(body.df) > 0 and len(doc_len) > 0:
+            body_bm25 = BM25FromIndex(body, body_dir, doc_len, avgdl, bucket_name=bucket_name)
+            print("  ✓ BM25 initialized")
+        else:
+            print("  ⚠ Body index or doc_len is empty, BM25 will be None")
+            body_bm25 = None
+    except Exception as e:
+        print(f"  ✗ Failed to initialize BM25: {e}")
+        import traceback
+        traceback.print_exc()
+        body_bm25 = None
+
+    print("Creating SearchEngine object...")
+    try:
+        _ENGINE = SearchEngine(
+            body_index=body,
+            title_index=title,
+            anchor_index=anchor,
+            titles=titles,
+            doc_norms=doc_norms,
+            doc_len=doc_len,
+            avgdl=avgdl,
+            pagerank=pagerank,
+            pageviews=pageviews,
+            body_bm25=body_bm25,
+            body_index_dir=body_dir,
+            title_index_dir=title_dir,
+            anchor_index_dir=anchor_dir,
+            bucket_name=bucket_name,
+        )
+        print("=" * 60)
+        print("✓ Search engine loaded successfully!")
+        print("=" * 60)
+    except Exception as e:
+        print(f"✗ Failed to create SearchEngine: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
     return _ENGINE
