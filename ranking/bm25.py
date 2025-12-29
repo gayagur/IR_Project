@@ -18,6 +18,7 @@ class BM25FromIndex:
         *,
         k1: float = 1.5,
         b: float = 0.75,
+        bucket_name: str | None = None,
     ):
         self.index = index
         self.index_dir = index_dir
@@ -25,6 +26,7 @@ class BM25FromIndex:
         self.avgdl = avgdl
         self.k1 = k1
         self.b = b
+        self.bucket_name = bucket_name
 
         N = getattr(index, "N", None)
         self.N = N if N is not None else max(1, len(doc_len))
@@ -46,7 +48,7 @@ class BM25FromIndex:
             if df is None:
                 continue
             idf = self._idf(df)
-            pls = self.index.read_a_posting_list(self.index_dir, term)
+            pls = self.index.read_a_posting_list(self.index_dir, term, bucket_name=self.bucket_name)
 
             for doc_id, tf in pls:
                 dl = self.doc_len.get(doc_id, 0)

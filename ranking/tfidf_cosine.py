@@ -20,6 +20,7 @@ def search_tfidf_cosine(
     *,
     top_n: int = 100,
     max_terms: int = 50,
+    bucket_name: str | None = None,
 ) -> List[Tuple[int, float]]:
     """
     Returns top_n (doc_id, score) using TF-IDF dot-product / cosine.
@@ -55,7 +56,7 @@ def search_tfidf_cosine(
 
     scores = defaultdict(float)
     for term, wq in q_weights.items():
-        pls = index.read_a_posting_list(index_dir, term)  # [(doc_id, tf), ...]
+        pls = index.read_a_posting_list(index_dir, term, bucket_name=bucket_name)  # [(doc_id, tf), ...]
         df = index.df[term]
         idf = _idf(N, df)
         for doc_id, tf in pls:

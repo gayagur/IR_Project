@@ -20,7 +20,7 @@ if ! gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE --project=$PR
     gcloud compute instances create $INSTANCE_NAME \
       --zone=$ZONE \
       --project=$PROJECT_NAME \
-      --machine-type=e2-standard-8 \
+      --machine-type=e2-highmem-8 \
       --boot-disk-size=200GB \
       --image-family=ubuntu-2204-lts \
       --image-project=ubuntu-os-cloud \
@@ -51,7 +51,7 @@ cd ~/IR_Project
 
 # Stop the VM automatically after 3 hours (even if indexing is still running)
 # This saves cost if you fall asleep.
-sudo shutdown -h +180 || true
+sudo shutdown -h +300 || true
 
 # Setup environment
 echo "Setting up Python environment..."
@@ -80,7 +80,7 @@ echo "Reading input data from GCS: gs://matiasgaya333/raw/wikidata20210801_prepr
 
 python3 -m indexing.build_indices \
   --dump "gs://matiasgaya333/raw/wikidata20210801_preprocessed/" \
-  --build all \
+  --build body \
   --parquet
 
 echo ""

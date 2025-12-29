@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+import traceback
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
@@ -6,6 +7,15 @@ class MyFlaskApp(Flask):
 
 app = MyFlaskApp(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors and show the actual error message."""
+    return jsonify({
+        "error": "Internal Server Error",
+        "message": str(error),
+        "traceback": traceback.format_exc()
+    }), 500
 
 @app.route("/search")
 def search():
@@ -30,26 +40,32 @@ def search():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
 
-    q_tokens = engine.tokenize_query(query)
-    if not q_tokens:
-        return jsonify(res)
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
 
-    # Candidates + scores from multiple signals
-    body_ranked = engine.search_body_bm25(q_tokens, top_n=300)
-    title_ranked = engine.search_title_count(q_tokens, top_n=5000)
-    anchor_ranked = engine.search_anchor_count(q_tokens, top_n=5000)
+        # Candidates + scores from multiple signals
+        body_ranked = engine.search_body_bm25(q_tokens, top_n=300)
+        title_ranked = engine.search_title_count(q_tokens, top_n=5000)
+        anchor_ranked = engine.search_anchor_count(q_tokens, top_n=5000)
 
-    merged = engine.merge_signals(
-        body_ranked=body_ranked,
-        title_ranked=title_ranked,
-        anchor_ranked=anchor_ranked,
-        top_n=100,
-    )
+        merged = engine.merge_signals(
+            body_ranked=body_ranked,
+            title_ranked=title_ranked,
+            anchor_ranked=anchor_ranked,
+            top_n=100,
+        )
 
-    res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)  # Print to server console
+        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
     # END SOLUTION
     return jsonify(res)
 
@@ -74,15 +90,21 @@ def search_body():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
 
-    q_tokens = engine.tokenize_query(query)
-    if not q_tokens:
-        return jsonify(res)
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
 
-    ranked = engine.search_body_tfidf_cosine(q_tokens, top_n=100)
-    res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+        ranked = engine.search_body_tfidf_cosine(q_tokens, top_n=100)
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search_body: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
     # END SOLUTION
     return jsonify(res)
 
@@ -112,15 +134,21 @@ def search_title():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
 
-    q_tokens = engine.tokenize_query(query)
-    if not q_tokens:
-        return jsonify(res)
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
 
-    ranked = engine.search_title_count(q_tokens, top_n=None)  # ALL
-    res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+        ranked = engine.search_title_count(q_tokens, top_n=None)  # ALL
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search_title: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
     # END SOLUTION
     return jsonify(res)
 
@@ -150,15 +178,21 @@ def search_anchor():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
-    from search_runtime import get_engine
-    engine = get_engine()
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
 
-    q_tokens = engine.tokenize_query(query)
-    if not q_tokens:
-        return jsonify(res)
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
 
-    ranked = engine.search_anchor_count(q_tokens, top_n=None)  # ALL
-    res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+        ranked = engine.search_anchor_count(q_tokens, top_n=None)  # ALL
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search_anchor: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
     # END SOLUTION
     return jsonify(res)
 

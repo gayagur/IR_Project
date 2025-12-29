@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files (גדולים מדי)
+data/
+indices/
+*.pkl
+*.parquet
+*.parq
+*.bin
+*.bz2
+
+# אבל שמור את sample.parquet
+!sample.parquet
+
+# Auxiliary files (גדולים)
+aux/*.pkl
+aux/*.txt
+!aux/.gitkeep
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

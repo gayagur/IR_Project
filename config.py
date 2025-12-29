@@ -24,14 +24,18 @@ BUCKET_NAME = "matiasgaya333"
 #   Local XML dump: "/path/to/enwiki.xml.bz2"
 #   Local parquet dir: "/path/to/wikidata20210801_preprocessed/"
 #   GCS parquet dir: "gs://<bucket>/raw/wikidata20210801_preprocessed/"
-RAW_DATA_PATH = "gs://wikidata20210801_preprocessed/"
+RAW_DATA_PATH = "gs://matiasgaya333/raw/wikidata20210801_preprocessed"
 
 # ============================================================================
 # Storage mode for indices
 # ============================================================================
 # Recommended: keep indices on LOCAL disk on your VM/Dataproc master, and only use GCS as the input source.
 # If you really need to store indices on GCS, set WRITE_TO_GCS = True AND ensure your InvertedIndex uses bucket_name.
-WRITE_TO_GCS = False
+WRITE_TO_GCS =  False
+
+# Set READ_FROM_GCS = True to read all indices and auxiliary files from GCS at runtime.
+# This is useful when running the server on a local machine but indices are stored in GCS.
+READ_FROM_GCS = True
 
 # When WRITE_TO_GCS=True, we use bucket-relative paths (NO 'gs://...' prefix) because inverted_index_gcp.py
 # opens blobs relative to bucket root.
