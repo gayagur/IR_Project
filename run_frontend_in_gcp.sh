@@ -75,8 +75,16 @@ gcloud compute ssh $GOOGLE_ACCOUNT_NAME@$INSTANCE_NAME --zone $ZONE --command="
   ls -la ${PROJECT_DIR}/aux/
 "
 
-# 6. Copy Python code from Cloud Shell to VM
-echo "[6/7] Copying Python code to VM..."
+# 6. Download latest code from GCS bucket to Cloud Shell (to ensure it's up to date)
+echo "[6/8] Downloading latest code from GCS bucket to Cloud Shell..."
+mkdir -p ~/IR_Project
+gsutil -m cp -r gs://${BUCKET_NAME}/IR_Project/* ~/IR_Project/ 2>/dev/null || {
+  echo "⚠ Warning: Could not download code from gs://${BUCKET_NAME}/IR_Project/"
+  echo "Will use local code in ~/IR_Project/"
+}
+
+# 7. Copy Python code from Cloud Shell to VM
+echo "[7/8] Copying Python code to VM..."
 gcloud compute scp --recurse \
   ~/IR_Project/search_frontend.py \
   ~/IR_Project/search_runtime.py \
@@ -85,11 +93,15 @@ gcloud compute scp --recurse \
   ~/IR_Project/text_processing.py \
   ~/IR_Project/parser_utils.py \
   ~/IR_Project/ranking \
+  ~/IR_Project/indexing \
   ${GOOGLE_ACCOUNT_NAME}@${INSTANCE_NAME}:${PROJECT_DIR}/ \
-  --zone ${ZONE}
+  --zone ${ZONE} 2>/dev/null || {
+  echo "⚠ Warning: Some files might not exist locally"
+  echo "Continuing with available files..."
+}
 
-# 7. Start the server
-echo "[7/7] Starting the search server..."
+# 8. Start the server
+echo "[8/8] Starting the search server..."
 gcloud compute ssh $GOOGLE_ACCOUNT_NAME@$INSTANCE_NAME --zone $ZONE --command="
   cd ${PROJECT_DIR}
   nohup ~/venv/bin/python search_frontend.py > ~/frontend.log 2>&1 &

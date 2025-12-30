@@ -35,7 +35,18 @@ def load_queries_train(path: str) -> Tuple[List[str], Dict[str, List[int]]]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # expected: list of {"query": "...", "relevant_docs": [..]}
-    queries = [x["query"] for x in data]
-    gold = {x["query"]: x["relevant_docs"] for x in data}
+    # Support two formats:
+    # 1. List format: [{"query": "...", "relevant_docs": [..]}, ...]
+    # 2. Dict format: {"query": [doc_ids], ...}
+    if isinstance(data, list):
+        # List format
+        queries = [x["query"] for x in data]
+        gold = {x["query"]: x["relevant_docs"] for x in data}
+    elif isinstance(data, dict):
+        # Dict format (like test_queries.json)
+        queries = list(data.keys())
+        gold = {query: [int(doc_id) for doc_id in doc_ids] for query, doc_ids in data.items()}
+    else:
+        raise ValueError(f"Unexpected format in {path}: expected list or dict")
+    
     return queries, gold

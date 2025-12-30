@@ -52,16 +52,23 @@ def search():
             return jsonify(res)
 
         # Candidates + scores from multiple signals
-        print("[SEARCH] Searching body index...")
-        body_ranked = engine.search_body_bm25(q_tokens, top_n=300)
+        # Run searches in parallel for faster performance
+        print("[SEARCH] Searching all indices in parallel...")
+        from concurrent.futures import ThreadPoolExecutor
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit all search tasks
+            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
+            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=5000)
+            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=5000)
+            
+            # Wait for all to complete
+            body_ranked = future_body.result()
+            title_ranked = future_title.result()
+            anchor_ranked = future_anchor.result()
+        
         print(f"[SEARCH] Body results: {len(body_ranked)}")
-        
-        print("[SEARCH] Searching title index...")
-        title_ranked = engine.search_title_count(q_tokens, top_n=5000)
         print(f"[SEARCH] Title results: {len(title_ranked)}")
-        
-        print("[SEARCH] Searching anchor index...")
-        anchor_ranked = engine.search_anchor_count(q_tokens, top_n=5000)
         print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
 
         print("[SEARCH] Merging signals...")
@@ -300,6 +307,47 @@ def run(**options):
 
 if __name__ == '__main__':
     import time
+    
+    # Step 1: Download indices from GCS if needed (BEFORE starting server)
+    # Only download if READ_FROM_GCS = False (if True, will read directly from GCS)
+    print("=" * 60)
+    print("Checking if indices need to be downloaded from GCS...")
+    print("=" * 60)
+    try:
+        from search_runtime import _check_if_indices_exist_locally, _download_indices_from_gcs_to_local
+        import config
+        
+        read_from_gcs = getattr(config, 'READ_FROM_GCS', False)
+        
+        if read_from_gcs:
+            print("READ_FROM_GCS = True - will read directly from GCS (no download)")
+            print("Skipping download step...")
+        else:
+            # READ_FROM_GCS = False - try to download to local disk for faster access
+            if not _check_if_indices_exist_locally():
+                print("Indices not found locally - downloading from GCS bucket...")
+                if not config.BUCKET_NAME:
+                    print("⚠ Warning: BUCKET_NAME is not set in config.py")
+                    print("Cannot download indices from GCS")
+                else:
+                    t0_download = time.time()
+                    if _download_indices_from_gcs_to_local(config.BUCKET_NAME):
+                        download_time = time.time() - t0_download
+                        print("=" * 60)
+                        print(f"✓ All indices downloaded in {download_time:.1f} seconds")
+                        print("=" * 60)
+                    else:
+                        print("⚠ Warning: Failed to download indices from GCS")
+                        print("Server will attempt to read directly from GCS as fallback")
+            else:
+                print("✓ Indices already exist locally - no download needed")
+    except Exception as e:
+        import traceback
+        print(f"⚠ Error checking/downloading indices: {e}")
+        print(traceback.format_exc())
+        print("Will continue with server startup...")
+    
+    # Step 2: Pre-load search engine (AFTER indices are downloaded)
     print("=" * 60)
     print("Pre-loading search engine...")
     print("=" * 60)
@@ -318,5 +366,9 @@ if __name__ == '__main__':
         print("Server will start but queries may be slow or fail")
         print("=" * 60)
     
+    # Step 3: Start the server (ONLY after indices are downloaded and engine is loaded)
+    print("=" * 60)
+    print("Starting Flask server...")
+    print("=" * 60)
     # run the Flask RESTful API, make the server publicly available (host='0.0.0.0') on port 8080
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False)

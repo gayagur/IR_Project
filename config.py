@@ -18,6 +18,15 @@ PROJECT_ID = "ir-project-481821"
 BUCKET_NAME = "matiasgaya333"
 
 # ============================================================================
+# Server configuration
+# ============================================================================
+# IP address and port of the GCP instance running the search engine
+INSTANCE_IP = "104.198.58.119"
+INSTANCE_PORT = 8080
+# Base URL for the search engine server
+BASE_URL = f"http://{INSTANCE_IP}:{INSTANCE_PORT}"
+
+# ============================================================================
 # Input data path
 # ============================================================================
 # Examples:

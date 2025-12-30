@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 
 import requests
 
-from experiments.evaluate import (
+from evaluate import (
     average_precision_at_k,
     load_queries_train,
     mean_ap_at_k,
@@ -62,7 +62,10 @@ def query_search_engine(base_url: str, endpoint: str, query: str) -> Tuple[List[
     """
     Query the search engine and return (doc_ids, time_taken).
     """
-    url = f"{base_url}/{endpoint}"
+    # Build URL - handle trailing slashes
+    base_url_clean = base_url.rstrip('/')
+    endpoint_clean = endpoint.lstrip('/')
+    url = f"{base_url_clean}/{endpoint_clean}"
     params = {"query": query}
     
     start_time = time.time()
@@ -71,16 +74,49 @@ def query_search_engine(base_url: str, endpoint: str, query: str) -> Tuple[List[
         elapsed = time.time() - start_time
         
         if response.status_code != 200:
-            print(f"Error {response.status_code} for query: {query}")
+            print(f"\nError {response.status_code} for query: {query}")
+            print(f"URL: {url}")
+            print(f"Response: {response.text[:500]}")
             return [], elapsed
         
         results = response.json()
-        # Extract doc_ids from [(doc_id, title), ...] format
-        doc_ids = [int(doc_id) for doc_id, _ in results]
+        
+        # Handle different response formats
+        if not results:
+            return [], elapsed
+        
+        # Extract doc_ids from [[doc_id, title], ...] or [(doc_id, title), ...] format
+        doc_ids = []
+        for item in results:
+            if isinstance(item, (list, tuple)) and len(item) >= 1:
+                doc_id = item[0]
+                # Convert to int if needed (handle both string and int doc_ids)
+                try:
+                    doc_ids.append(int(doc_id))
+                except (ValueError, TypeError) as e:
+                    print(f"\nWarning: Could not convert doc_id '{doc_id}' to int: {e}")
+                    continue
+            else:
+                print(f"\nWarning: Unexpected result format: {item}")
+        
         return doc_ids, elapsed
+    except requests.exceptions.RequestException as e:
+        elapsed = time.time() - start_time
+        print(f"\nRequest exception for query '{query}': {e}")
+        print(f"URL: {url}")
+        return [], elapsed
+    except json.JSONDecodeError as e:
+        elapsed = time.time() - start_time
+        print(f"\nJSON decode error for query '{query}': {e}")
+        print(f"URL: {url}")
+        print(f"Response text: {response.text[:500]}")
+        return [], elapsed
     except Exception as e:
         elapsed = time.time() - start_time
-        print(f"Exception for query '{query}': {e}")
+        print(f"\nUnexpected exception for query '{query}': {e}")
+        print(f"URL: {url}")
+        import traceback
+        traceback.print_exc()
         return [], elapsed
 
 
@@ -136,23 +172,47 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Evaluate search engine performance")
-    parser.add_argument("--base-url", default="http://localhost:8080", help="Base URL of search engine")
-    parser.add_argument("--queries", default="queries_train.json", help="Path to queries_train.json")
+    # Import config to get default base URL
+    try:
+        import config
+        default_base_url = getattr(config, 'BASE_URL', 'http://localhost:8080')
+    except ImportError:
+        default_base_url = 'http://localhost:8080'
+    
+    parser.add_argument("--base-url", default=default_base_url, help=f"Base URL of search engine (default: {default_base_url})")
+    parser.add_argument("--queries", default="test_queries.json", help="Path to queries JSON file (test_queries.json or queries_train.json)")
     parser.add_argument("--output", default="evaluation_results.json", help="Output file for results")
     parser.add_argument("--endpoints", nargs="+", 
-                       default=["search", "search_body", "search_title", "search_anchor", "search_pagerank", "search_pageview"],
-                       help="Endpoints to evaluate")
+                       default=["search", "search_body", "search_title", "search_anchor"],
+                       help="Endpoints to evaluate (available: search, search_body, search_title, search_anchor)")
     args = parser.parse_args()
     
     # Load queries
     queries_path = Path(args.queries)
+    # If path is relative, try to find it in project root
+    if not queries_path.is_absolute() and not queries_path.exists():
+        # Try project root (parent of experiments directory)
+        project_root = Path(__file__).parent.parent
+        queries_path = project_root / args.queries
+    # If still not found, try as absolute path
     if not queries_path.exists():
         print(f"Error: {queries_path} not found!")
-        print("Please provide the queries_train.json file.")
+        print(f"Tried: {args.queries}")
+        print(f"Tried: {Path(__file__).parent.parent / args.queries}")
+        print("Please provide the correct path to the queries JSON file.")
         return
     
     queries, gold = load_queries_train(str(queries_path))
     print(f"Loaded {len(queries)} queries from {queries_path}")
+    
+    # Print configuration
+    print("\n" + "="*60)
+    print("EVALUATION CONFIGURATION")
+    print("="*60)
+    print(f"Base URL: {args.base_url}")
+    print(f"Endpoints to evaluate: {', '.join(args.endpoints)}")
+    print(f"Number of queries: {len(queries)}")
+    print("="*60 + "\n")
     
     # Evaluate each endpoint
     all_results = {}

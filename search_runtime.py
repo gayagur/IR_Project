@@ -134,19 +134,48 @@ class SearchEngine:
         top_n: Optional[int],
         bucket_name: Optional[str] = None,
     ) -> List[Tuple[int, float]]:
-        """Rank docs by number of DISTINCT query tokens that appear in the doc (title/anchor)."""
+        """Rank docs by number of DISTINCT query tokens that appear in the doc (title/anchor).
+        
+        Uses parallel posting list reads for faster performance.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         scores: Dict[int, int] = {}
         seen_terms = set()
-
+        
+        # Collect valid terms
+        valid_terms = []
         for t in q_tokens:
             if t in seen_terms or t not in index.df:
                 continue
             seen_terms.add(t)
-            pl = index.read_a_posting_list(index_dir, t, bucket_name=bucket_name)
-            for doc_id, _tf in pl:
-                doc_id = int(doc_id)
-                scores[doc_id] = scores.get(doc_id, 0) + 1
-
+            valid_terms.append(t)
+        
+        if not valid_terms:
+            return []
+        
+        # Read posting lists in parallel
+        def read_posting_list(term):
+            """Read a single posting list."""
+            try:
+                return term, index.read_a_posting_list(index_dir, term, bucket_name=bucket_name)
+            except Exception as e:
+                print(f"  ⚠ Error reading posting list for '{term}': {e}")
+                return term, []
+        
+        # Read all posting lists in parallel
+        with ThreadPoolExecutor(max_workers=min(10, len(valid_terms))) as executor:
+            future_to_term = {
+                executor.submit(read_posting_list, term): term
+                for term in valid_terms
+            }
+            
+            for future in as_completed(future_to_term):
+                term, pl = future.result()
+                for doc_id, _tf in pl:
+                    doc_id = int(doc_id)
+                    scores[doc_id] = scores.get(doc_id, 0) + 1
+        
         ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
         if top_n is None:
             return [(d, float(s)) for d, s in ranked]
@@ -181,6 +210,17 @@ class SearchEngine:
         if not cand_ids:
             return []
 
+        # Debug: check if pagerank has any values
+        if not self.pagerank:
+            print(f"[MERGE_SIGNALS WARNING] pagerank dictionary is empty!")
+        else:
+            # Check if any candidate IDs exist in pagerank
+            found_in_pr = sum(1 for d in cand_ids[:10] if d in self.pagerank)
+            if found_in_pr == 0 and len(cand_ids) > 0:
+                print(f"[MERGE_SIGNALS WARNING] None of first 10 candidate IDs found in pagerank!")
+                print(f"  Sample candidate IDs: {cand_ids[:5]}")
+                print(f"  Sample pagerank keys: {list(self.pagerank.keys())[:5] if self.pagerank else []}")
+        
         pr_vals = [float(self.pagerank.get(d, 0.0)) for d in cand_ids]
         pv_vals = [float(self.pageviews.get(d, 0)) for d in cand_ids]
 
@@ -201,6 +241,155 @@ class SearchEngine:
 _ENGINE: Optional[SearchEngine] = None
 
 
+def _check_if_indices_exist_locally() -> bool:
+    """Check if indices exist on local disk."""
+    from pathlib import Path
+    import config
+    
+    # Check main index files
+    body_pkl = config.INDICES_DIR / "body" / "body.pkl"
+    title_pkl = config.INDICES_DIR / "title" / "title.pkl"
+    anchor_pkl = config.INDICES_DIR / "anchor" / "anchor.pkl"
+    
+    if not (body_pkl.exists() and title_pkl.exists() and anchor_pkl.exists()):
+        return False
+    
+    # Check at least one aux file exists
+    aux_dir = config.AUX_DIR
+    if not aux_dir.exists():
+        return False
+    
+    # Check if at least titles.pkl exists
+    if not (aux_dir / "titles.pkl").exists():
+        return False
+    
+    return True
+
+
+def _download_indices_from_gcs_to_local(bucket_name: str) -> bool:
+    """Download all indices and auxiliary files from GCS to local disk.
+    
+    Uses parallel downloads to speed up the process.
+    
+    Returns True if download was successful, False otherwise.
+    """
+    from pathlib import Path
+    from google.cloud import storage
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import config
+    
+    print("=" * 60)
+    print("Downloading indices from GCS to local disk (parallel)...")
+    print("=" * 60)
+    
+    try:
+        client = storage.Client(project=config.PROJECT_ID)
+        bucket = client.bucket(bucket_name)
+        
+        # Ensure local directories exist
+        config.INDICES_DIR.mkdir(parents=True, exist_ok=True)
+        config.AUX_DIR.mkdir(parents=True, exist_ok=True)
+        
+        (config.INDICES_DIR / "body").mkdir(parents=True, exist_ok=True)
+        (config.INDICES_DIR / "title").mkdir(parents=True, exist_ok=True)
+        (config.INDICES_DIR / "anchor").mkdir(parents=True, exist_ok=True)
+        
+        def download_file(blob, local_path):
+            """Download a single file from GCS."""
+            try:
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                blob.download_to_filename(str(local_path))
+                return True
+            except Exception as e:
+                print(f"  ✗ Error downloading {blob.name}: {e}")
+                return False
+        
+        # Download indices in parallel
+        indices_to_download = [
+            ("indices/body", config.INDICES_DIR / "body"),
+            ("indices/title", config.INDICES_DIR / "title"),
+            ("indices/anchor", config.INDICES_DIR / "anchor"),
+        ]
+        
+        total_files = 0
+        # Use ThreadPoolExecutor for parallel downloads
+        # Adjust max_workers based on your needs (more = faster but more memory/network)
+        max_workers = 10  # Download 10 files in parallel
+        
+        for gcs_prefix, local_dir in indices_to_download:
+            print(f"Downloading {gcs_prefix} (parallel, {max_workers} workers)...")
+            
+            # Collect all files to download
+            files_to_download = []
+            for blob in bucket.list_blobs(prefix=gcs_prefix + "/"):
+                if blob.name.endswith("/"):
+                    continue
+                
+                relative_path = blob.name[len(gcs_prefix) + 1:]
+                local_path = local_dir / relative_path
+                files_to_download.append((blob, local_path))
+            
+            # Download files in parallel
+            files_downloaded = 0
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all download tasks
+                future_to_file = {
+                    executor.submit(download_file, blob, local_path): (blob.name, local_path)
+                    for blob, local_path in files_to_download
+                }
+                
+                # Process completed downloads
+                for future in as_completed(future_to_file):
+                    blob_name, local_path = future_to_file[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            files_downloaded += 1
+                            total_files += 1
+                            
+                            if files_downloaded % 100 == 0:
+                                print(f"  Downloaded {files_downloaded}/{len(files_to_download)} files...")
+                    except Exception as e:
+                        print(f"  ✗ Error downloading {blob_name}: {e}")
+            
+            print(f"  ✓ {gcs_prefix}: {files_downloaded}/{len(files_to_download)} files")
+        
+        # Download auxiliary files (small files, can do sequentially or in parallel)
+        print("Downloading auxiliary files...")
+        aux_files = [
+            "titles.pkl",
+            "doc_norms.pkl",
+            "doc_len.pkl",
+            "avgdl.txt",
+            "pagerank.pkl",
+            "pageviews.pkl",
+        ]
+        
+        aux_downloaded = 0
+        for filename in aux_files:
+            blob_path = f"aux/{filename}"
+            blob = bucket.blob(blob_path)
+            if blob.exists():
+                local_path = config.AUX_DIR / filename
+                blob.download_to_filename(str(local_path))
+                aux_downloaded += 1
+                print(f"  ✓ {filename}")
+            else:
+                print(f"  ⚠ {filename} not found in GCS")
+        
+        print("=" * 60)
+        print(f"✓ Download completed: {total_files} index files, {aux_downloaded} aux files")
+        print("=" * 60)
+        
+        return True
+        
+    except Exception as e:
+        print(f"✗ Error downloading from GCS: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def get_engine() -> SearchEngine:
     global _ENGINE
     if _ENGINE is not None:
@@ -210,92 +399,119 @@ def get_engine() -> SearchEngine:
     print("Loading search engine...")
     print("=" * 60)
 
-    # NOTE: We can read from GCS if indices are stored there.
-    # Set config.READ_FROM_GCS=True to read all files (indices + aux) from GCS.
-    # Otherwise, reads from local filesystem.
+    # Determine if we should read from GCS or local filesystem
     read_from_gcs = getattr(config, 'READ_FROM_GCS', False)
-    bucket_name = config.BUCKET_NAME if read_from_gcs else None
+    
+    # If READ_FROM_GCS = True, always read from GCS (even if local files exist)
+    if read_from_gcs:
+        print("READ_FROM_GCS = True - reading directly from GCS")
+        bucket_name = config.BUCKET_NAME
+    else:
+        # READ_FROM_GCS = False - prefer local filesystem if available
+        if _check_if_indices_exist_locally():
+            print("Indices found locally - using local filesystem (faster)")
+            read_from_gcs = False
+            bucket_name = None
+        else:
+            # Indices not found locally - fall back to GCS even if READ_FROM_GCS=False
+            print("⚠ Warning: Indices not found locally")
+            if config.BUCKET_NAME:
+                print("Falling back to reading from GCS (slower)")
+                bucket_name = config.BUCKET_NAME
+                read_from_gcs = True  # Temporarily enable GCS reading as fallback
+            else:
+                print("⚠ Error: No local indices and BUCKET_NAME not set")
+                bucket_name = None
+    
     print(f"READ_FROM_GCS: {read_from_gcs}, BUCKET_NAME: {bucket_name}")
 
     body_dir = str(config.BODY_INDEX_DIR)
     title_dir = str(config.TITLE_INDEX_DIR)
     anchor_dir = str(config.ANCHOR_INDEX_DIR)
 
-    # Load indices with error handling
-    print("Loading body index...")
-    try:
-        body = InvertedIndex.read_index(body_dir, "body", bucket_name=bucket_name)
-        print(f"  ✓ Body index loaded: {len(body.df):,} terms")
-    except Exception as e:
-        print(f"  ✗ Failed to load body index: {e}")
-        body = InvertedIndex()  # Empty index
-
-    print("Loading title index...")
-    try:
-        title = InvertedIndex.read_index(title_dir, "title", bucket_name=bucket_name)
-        print(f"  ✓ Title index loaded: {len(title.df):,} terms")
-    except Exception as e:
-        print(f"  ✗ Failed to load title index: {e}")
-        title = InvertedIndex()  # Empty index
-
-    print("Loading anchor index...")
-    try:
-        anchor = InvertedIndex.read_index(anchor_dir, "anchor", bucket_name=bucket_name)
-        print(f"  ✓ Anchor index loaded: {len(anchor.df):,} terms")
-    except Exception as e:
-        print(f"  ✗ Failed to load anchor index: {e}")
-        anchor = InvertedIndex()  # Empty index
-
-    # Load auxiliary files with error handling
-    print("Loading auxiliary files...")
+    # Load indices in parallel for faster startup
+    print("Loading indices in parallel...")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    print("  Loading titles...")
-    try:
-        titles = _load_pickle(config.TITLES_PATH, {}, bucket_name=bucket_name)
-        print(f"    ✓ Titles loaded: {len(titles):,} entries")
-    except Exception as e:
-        print(f"    ✗ Failed to load titles: {e}")
-        titles = {}
+    def load_index(index_name, index_dir, name):
+        """Load a single index."""
+        try:
+            index = InvertedIndex.read_index(index_dir, name, bucket_name=bucket_name)
+            return index_name, index, None
+        except Exception as e:
+            return index_name, InvertedIndex(), str(e)
+    
+    def load_aux_file(file_name, load_func, *args):
+        """Load a single auxiliary file."""
+        try:
+            result = load_func(*args)
+            return file_name, result, None
+        except Exception as e:
+            default = {} if 'pickle' in str(load_func) else 0.0
+            return file_name, default, str(e)
+    
+    # Load all indices in parallel
+    indices = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_name = {
+            executor.submit(load_index, "body", body_dir, "body"): "body",
+            executor.submit(load_index, "title", title_dir, "title"): "title",
+            executor.submit(load_index, "anchor", anchor_dir, "anchor"): "anchor",
+        }
+        
+        for future in as_completed(future_to_name):
+            name, index, error = future.result()
+            indices[name] = index
+            if error:
+                print(f"  ✗ Failed to load {name} index: {error}")
+            else:
+                print(f"  ✓ {name.capitalize()} index loaded: {len(index.df):,} terms")
+    
+    body = indices.get("body", InvertedIndex())
+    title = indices.get("title", InvertedIndex())
+    anchor = indices.get("anchor", InvertedIndex())
 
-    print("  Loading doc_norms...")
-    try:
-        doc_norms = _load_pickle(config.DOC_NORMS_PATH, {}, bucket_name=bucket_name)
-        print(f"    ✓ Doc norms loaded: {len(doc_norms):,} entries")
-    except Exception as e:
-        print(f"    ✗ Failed to load doc_norms: {e}")
-        doc_norms = {}
-
-    print("  Loading doc_len...")
-    try:
-        doc_len = _load_pickle(config.DOC_LEN_PATH, {}, bucket_name=bucket_name)
-        print(f"    ✓ Doc len loaded: {len(doc_len):,} entries")
-    except Exception as e:
-        print(f"    ✗ Failed to load doc_len: {e}")
-        doc_len = {}
-
-    print("  Loading avgdl...")
-    try:
-        avgdl = _load_float_text(config.AVGDL_PATH, default=0.0, bucket_name=bucket_name)
-        print(f"    ✓ Avgdl loaded: {avgdl}")
-    except Exception as e:
-        print(f"    ✗ Failed to load avgdl: {e}")
-        avgdl = 0.0
-
-    print("  Loading pagerank...")
-    try:
-        pagerank = _load_pickle(config.PAGERANK_PATH, {}, bucket_name=bucket_name)
-        print(f"    ✓ PageRank loaded: {len(pagerank):,} entries")
-    except Exception as e:
-        print(f"    ✗ Failed to load PageRank: {e}")
-        pagerank = {}
-
-    print("  Loading pageviews...")
-    try:
-        pageviews = _load_pickle(config.PAGEVIEWS_PATH, {}, bucket_name=bucket_name)
-        print(f"    ✓ PageViews loaded: {len(pageviews):,} entries")
-    except Exception as e:
-        print(f"    ✗ Failed to load PageViews: {e}")
-        pageviews = {}
+    # Load auxiliary files in parallel
+    print("Loading auxiliary files in parallel...")
+    aux_files = {}
+    
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_name = {
+            executor.submit(load_aux_file, "titles", _load_pickle, config.TITLES_PATH, {}, bucket_name): "titles",
+            executor.submit(load_aux_file, "doc_norms", _load_pickle, config.DOC_NORMS_PATH, {}, bucket_name): "doc_norms",
+            executor.submit(load_aux_file, "doc_len", _load_pickle, config.DOC_LEN_PATH, {}, bucket_name): "doc_len",
+            executor.submit(load_aux_file, "avgdl", _load_float_text, config.AVGDL_PATH, 0.0, bucket_name): "avgdl",
+            executor.submit(load_aux_file, "pagerank", _load_pickle, config.PAGERANK_PATH, {}, bucket_name): "pagerank",
+            executor.submit(load_aux_file, "pageviews", _load_pickle, config.PAGEVIEWS_PATH, {}, bucket_name): "pageviews",
+        }
+        
+        for future in as_completed(future_to_name):
+            name, result, error = future.result()
+            aux_files[name] = result
+            if error:
+                print(f"    ✗ Failed to load {name}: {error}")
+            else:
+                if isinstance(result, dict):
+                    print(f"    ✓ {name.capitalize()} loaded: {len(result):,} entries")
+                    # Special check for pagerank
+                    if name == "pagerank" and result:
+                        sample_ids = list(result.keys())[:3]
+                        sample_prs = [result[id] for id in sample_ids]
+                        max_pr = max(result.values()) if result else 0.0
+                        min_pr = min(result.values()) if result else 0.0
+                        print(f"      Sample: {list(zip(sample_ids, sample_prs))}")
+                        print(f"      Range: [{min_pr:.6f}, {max_pr:.6f}]")
+                        non_zero = sum(1 for v in result.values() if v > 0)
+                        print(f"      Non-zero entries: {non_zero:,}/{len(result):,} ({100*non_zero/len(result):.1f}%)")
+                else:
+                    print(f"    ✓ {name.capitalize()} loaded: {result}")
+    
+    titles = aux_files.get("titles", {})
+    doc_norms = aux_files.get("doc_norms", {})
+    doc_len = aux_files.get("doc_len", {})
+    avgdl = aux_files.get("avgdl", 0.0)
+    pagerank = aux_files.get("pagerank", {})
+    pageviews = aux_files.get("pageviews", {})
 
     print("Initializing BM25...")
     try:
