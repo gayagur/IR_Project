@@ -42,6 +42,7 @@
 A complete search pipeline for the English Wikipedia corpus featuring:
 - **Multi-signal ranking** combining text relevance, link analysis, and popularity metrics
 - **BM25 probabilistic ranking** with tuned parameters
+- **LSI reranking** on top-K results for semantic similarity
 - **6.3M documents** indexed across body, title, and anchor text
 - **Sub-second query latency** with lazy index loading
 - **RESTful API** for easy integration
@@ -58,19 +59,24 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Flask API (search_frontend.py)                │
 │                                                                  │
-│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor)      │
+│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor + LSI)│
 │  /search_body ─► TF-IDF Cosine on article text                   │
 │  /search_title ► Title matching                                  │
 │  /search_anchor► Anchor text search                              │
+│  /search_lsi ──► LSI-only search                                 │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Ranking Engine                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │  Body    │ │  Title   │ │  Anchor  │ │ PageRank │            │
-│  │  BM25    │ │  Binary  │ │  Binary  │ │  Boost   │            │
+│  │  Body    │ │  Title   │ │  Anchor  │ │   LSI    │            │
+│  │  BM25    │ │  Binary  │ │  Binary  │ │ Rerank   │            │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘            │
+│  ┌──────────┐ ┌──────────┐                                       │
+│  │ PageRank │ │ PageView │                                       │
+│  │  Boost   │ │  Boost   │                                       │
+│  └──────────┘ └──────────┘                                       │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -80,6 +86,9 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 │  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
 │  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, Norms│  │
 │  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ LSI Index (optional) - lsi_vectors, svd_components        │  │
+│  └────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,19 +102,23 @@ IR_Project/
 ├── config.py                 # Configuration & weights
 ├── inverted_index_gcp.py     # Inverted index with GCP support
 ├── text_processing.py        # Tokenization & stemming
+├── parser_utils.py           # Wikipedia XML parsing utilities
 │
 ├── indexing/
 │   └── build_indices.py      # Index construction pipeline
 │
 ├── ranking/
 │   ├── bm25.py               # BM25 implementation
+│   ├── lsi.py                # LSI (Latent Semantic Indexing)
 │   ├── tfidf_cosine.py       # TF-IDF cosine similarity
 │   └── merge.py              # Score fusion
 │
 └── experiments/
     ├── evaluate.py           # MAP@K, Precision, Recall metrics
+    ├── run_evaluation.py     # Main evaluation script
     ├── bm25_tuning.py        # BM25 parameter optimization
-    └── weight_tuning.py      # Multi-signal weight optimization
+    ├── weight_tuning.py      # Multi-signal weight optimization
+    └── compare_versions.py   # Version comparison & visualization
 ```
 
 ---
@@ -116,7 +129,7 @@ IR_Project/
 ```bash
 GET /search?query=<query>
 ```
-Multi-signal fusion combining all ranking signals.
+Multi-signal fusion combining all ranking signals with LSI reranking.
 
 **Response:**
 ```json
@@ -131,17 +144,18 @@ Multi-signal fusion combining all ranking signals.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + PageRank + PageView |
+| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + LSI + PageRank + PageView |
 | `/search_body` | GET | TF-IDF Cosine similarity on article body |
 | `/search_title` | GET | Binary title matching |
 | `/search_anchor` | GET | Binary anchor text search |
+| `/search_lsi` | GET | LSI-only search (for testing) |
 | `/search_with_weights` | GET | Custom weight configuration |
 | `/get_pagerank` | POST | Get PageRank scores for doc IDs |
 | `/get_pageview` | POST | Get page view counts for doc IDs |
 
 ### Custom Weight Search
 ```bash
-GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=2.0&anchor_weight=0.75&pagerank_boost=0.15
+GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=0.35&anchor_weight=0.25&lsi_weight=0.25&pagerank_boost=0.15
 ```
 
 ---
@@ -159,6 +173,20 @@ score(D, Q) = Σ IDF(qi) · (tf(qi, D) · (k1 + 1)) / (tf(qi, D) + k1 · (1 - b 
 | `k1` | Term frequency saturation | 2.5 |
 | `b` | Document length normalization | 0.0 |
 
+### LSI (Latent Semantic Indexing)
+LSI reranking on top-K results for semantic similarity:
+- Projects queries and documents into latent semantic space
+- Uses TruncatedSVD with 100 components
+- Only reranks top-K results (default: 100) for efficiency
+- Can be disabled by setting `LSI_WEIGHT = 0.0`
+
+**Configuration:**
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `LSI_TOP_K` | Number of results to rerank | 100 |
+| `LSI_WEIGHT` | LSI weight in fusion | 0.25 |
+| `LSI_N_COMPONENTS` | Latent dimensions | 100 |
+
 ### TF-IDF Cosine Similarity (`/search_body` Endpoint)
 ```
 score(D, Q) = (D · Q) / (||D|| · ||Q||)
@@ -172,21 +200,29 @@ score(D, Q) = number of query terms found in document
 
 ### Multi-Signal Fusion (`/search` Endpoint)
 ```python
-final_score = (
+# Step 1: Initial ranking (without LSI)
+initial_score = (
     body_weight * BM25_body(q, d) +
     title_weight * binary_title(q, d) +
     anchor_weight * binary_anchor(q, d) +
     pagerank_boost * log(1 + pagerank(d)) +
     pageview_boost * log(1 + pageviews(d))
 )
+
+# Step 2: LSI reranking on top-K
+if LSI_WEIGHT > 0:
+    top_k_results = get_top_k(initial_score, k=LSI_TOP_K)
+    lsi_score = LSI_similarity(q, d)
+    final_score = blend(initial_score, lsi_score, LSI_WEIGHT)
 ```
 
 **Default Weights:**
 | Signal | Weight | Method |
 |--------|--------|--------|
 | Body | 1.0 | BM25 |
-| Title | 2.0 | Binary |
-| Anchor | 0.75 | Binary |
+| Title | 0.35 | Binary |
+| Anchor | 0.25 | Binary |
+| LSI | 0.25 | Reranking (top-K) |
 | PageRank | 0.15 | Log boost |
 | PageView | 0.10 | Log boost |
 
@@ -199,6 +235,7 @@ final_score = (
 | Body | 28M | 6.3M | ~15 GB |
 | Title | 1.7M | 6.3M | ~500 MB |
 | Anchor | 2.4M | 5.8M | ~1.1 GB |
+| LSI | 50K | 6.3M | ~500 MB (optional) |
 | PageRank | - | 6.3M | ~50 MB |
 | PageViews | - | 10.7M | ~100 MB |
 
@@ -208,7 +245,7 @@ final_score = (
 
 ### Prerequisites
 ```bash
-pip install flask google-cloud-storage nltk numpy
+pip install -r requirements.txt
 ```
 
 ### Running Locally
@@ -254,6 +291,12 @@ python experiments/weight_tuning.py --base-url http://<SERVER_IP>:8080
 ```
 Tests hundreds of weight combinations and generates visualization reports.
 
+### Version Comparison
+```bash
+python experiments/compare_versions.py --base-url http://<SERVER_IP>:8080
+```
+Compares different search engine configurations and generates comparison visualizations.
+
 ### Metrics
 - **MAP@10** - Mean Average Precision at 10
 - **MAP@5** - Mean Average Precision at 5
@@ -276,9 +319,15 @@ data/
 └── aux/
     ├── doc_norms.pkl   # TF-IDF normalization factors
     ├── doc_len.pkl     # Document lengths (for BM25)
+    ├── avgdl.txt       # Average document length
     ├── pagerank.pkl    # PageRank scores (6.3M entries)
     ├── pageviews.pkl   # Page view counts
-    └── titles.pkl      # doc_id → title mapping
+    ├── titles.pkl      # doc_id → title mapping
+    └── lsi/            # LSI index files (optional)
+        ├── lsi_vectors.pkl
+        ├── svd_components.pkl
+        ├── term_to_idx.pkl
+        └── doc_to_idx.pkl
 ```
 
 ---
@@ -288,18 +337,24 @@ data/
 Edit `config.py` to customize:
 ```python
 # Index paths
-BODY_INDEX_PATH = "indices/body"
-TITLE_INDEX_PATH = "indices/title"
-ANCHOR_INDEX_PATH = "indices/anchor"
+BODY_INDEX_DIR = "indices/body"
+TITLE_INDEX_DIR = "indices/title"
+ANCHOR_INDEX_DIR = "indices/anchor"
 
 # BM25 parameters
-BM25_K1 = 1.5
-BM25_B = 0.75
+BM25_K1 = 2.5
+BM25_B = 0.0
+
+# LSI configuration
+LSI_TOP_K = 100          # Number of results to rerank
+LSI_WEIGHT = 0.25        # LSI weight (0.0 to disable)
+LSI_N_COMPONENTS = 100   # Latent dimensions
 
 # Ranking weights
 BODY_WEIGHT = 1.0
-TITLE_WEIGHT = 2.0
-ANCHOR_WEIGHT = 0.75
+TITLE_WEIGHT = 0.35
+ANCHOR_WEIGHT = 0.25
+LSI_WEIGHT = 0.25
 PAGERANK_BOOST = 0.15
 PAGEVIEW_BOOST = 0.10
 
@@ -318,6 +373,7 @@ RESULTS_LIMIT = 100
 | Index Load Time | ~2 min |
 | Memory Usage | ~8 GB |
 | Throughput | ~10 queries/sec |
+| LSI Reranking Time | ~50ms (on top-100) |
 
 ---
 
@@ -325,7 +381,7 @@ RESULTS_LIMIT = 100
 
 > Replace `<SERVER_IP>` with your instance IP (e.g., `104.198.58.119`)
 ```bash
-# Main search (BM25 + all signals)
+# Main search (BM25 + all signals + LSI reranking)
 curl "http://<SERVER_IP>:8080/search?query=machine+learning"
 
 # Body search (TF-IDF Cosine)
@@ -334,13 +390,16 @@ curl "http://<SERVER_IP>:8080/search_body?query=artificial+intelligence"
 # Title search (Binary)
 curl "http://<SERVER_IP>:8080/search_title?query=python+programming"
 
+# LSI-only search
+curl "http://<SERVER_IP>:8080/search_lsi?query=deep+learning"
+
 # Custom weights
-curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5"
+curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
 ```
 
 ### Live Examples (Current Deployment)
 ```bash
-# Main search (BM25 + all signals)
+# Main search (BM25 + all signals + LSI reranking)
 curl "http://104.198.58.119:8080/search?query=machine+learning"
 
 # Body search (TF-IDF Cosine)
@@ -352,8 +411,11 @@ curl "http://104.198.58.119:8080/search_title?query=python+programming"
 # Anchor search (Binary)
 curl "http://104.198.58.119:8080/search_anchor?query=united+states"
 
+# LSI-only search
+curl "http://104.198.58.119:8080/search_lsi?query=deep+learning"
+
 # Custom weights
-curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5"
+curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
 
 # Get PageRank for documents
 curl -X POST "http://104.198.58.119:8080/get_pagerank" \
@@ -372,6 +434,7 @@ curl -X POST "http://104.198.58.119:8080/get_pageview" \
 
 - Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*
 - Page, L., et al. (1999). *The PageRank Citation Ranking: Bringing Order to the Web*
+- Deerwester, S., et al. (1990). *Indexing by Latent Semantic Analysis*
 
 ---
 
