@@ -415,10 +415,14 @@ def search_body_bm25():
     
     try:
         from search_runtime import get_engine
+        import config
         engine = get_engine()
         
-        k1 = float(request.args.get('k1', 1.5))
-        b = float(request.args.get('b', 0.75))
+        # Use config defaults if not provided
+        default_k1 = getattr(config, 'BM25_K1', 2.5)
+        default_b = getattr(config, 'BM25_B', 0.0)
+        k1 = float(request.args.get('k1', default_k1))
+        b = float(request.args.get('b', default_b))
         
         q_tokens = engine.tokenize_query(query)
         if not q_tokens:

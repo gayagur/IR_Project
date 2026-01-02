@@ -118,8 +118,8 @@ class SearchEngine:
         q_tokens: List[str], 
         *, 
         top_n: int = 100,
-        k1: float = 1.5,
-        b: float = 0.75,
+        k1: float | None = None,
+        b: float | None = None,
     ) -> List[Tuple[int, float]]:
         """
         Search using BM25 scoring with customizable parameters.
@@ -127,8 +127,8 @@ class SearchEngine:
         Args:
             q_tokens: List of query tokens
             top_n: Number of top results to return
-            k1: Term frequency saturation parameter (default: 1.5)
-            b: Document length normalization parameter (default: 0.75)
+            k1: Term frequency saturation parameter (default: from config.BM25_K1)
+            b: Document length normalization parameter (default: from config.BM25_B)
             
         Returns:
             List of (doc_id, score) tuples, sorted by score descending
@@ -136,6 +136,13 @@ class SearchEngine:
         if self.body_bm25 is None:
             print("[WARNING] body_bm25 is None, returning empty results")
             return []
+        
+        # Use config defaults if not provided
+        if k1 is None:
+            k1 = getattr(config, 'BM25_K1', 2.5)
+        if b is None:
+            b = getattr(config, 'BM25_B', 0.0)
+        
         return self.body_bm25.search(q_tokens, top_n=top_n, k1=k1, b=b)
 
     def search_body_tfidf_cosine(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
@@ -574,8 +581,11 @@ def get_engine() -> SearchEngine:
     print("Initializing BM25...")
     try:
         if len(body.df) > 0 and len(doc_len) > 0:
-            body_bm25 = BM25FromIndex(body, body_dir, doc_len, avgdl, bucket_name=bucket_name)
-            print("  ✓ BM25 initialized")
+            # Use BM25 parameters from config
+            bm25_k1 = getattr(config, 'BM25_K1', 2.5)
+            bm25_b = getattr(config, 'BM25_B', 0.0)
+            body_bm25 = BM25FromIndex(body, body_dir, doc_len, avgdl, k1=bm25_k1, b=bm25_b, bucket_name=bucket_name)
+            print(f"  ✓ BM25 initialized (k1={bm25_k1}, b={bm25_b})")
         else:
             print("  ⚠ Body index or doc_len is empty, BM25 will be None")
             body_bm25 = None

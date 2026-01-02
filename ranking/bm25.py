@@ -16,8 +16,8 @@ class BM25FromIndex:
         doc_len: Dict[int, int],
         avgdl: float,
         *,
-        k1: float = 1.5,
-        b: float = 0.75,
+        k1: float = 2.5,
+        b: float = 0.0,
         bucket_name: str | None = None,
     ):
         self.index = index
