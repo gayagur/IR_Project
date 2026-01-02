@@ -8,6 +8,34 @@
 ![Wikipedia](https://img.shields.io/badge/Corpus-Wikipedia%202021-green.svg)
 
 ---
+## 👥 Authors
+
+<div align="center">
+
+### ✨ Project Creators ✨
+
+
+  <tr>
+    <td align="center">
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Gaya%20Gur%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Gaya Gur"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Matias%20Guernik%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Matias Guernik"/>
+    </td>
+  </tr>
+
+
+<br/>
+
+<img src="https://img.shields.io/badge/📚%20Information%20Retrieval-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
+&nbsp;
+<img src="https://img.shields.io/badge/🎓%202024%2F2025-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
+
+</div>
+
+---
+
+
 
 ## 📖 Overview
 
@@ -128,8 +156,8 @@ score(D, Q) = Σ IDF(qi) · (tf(qi, D) · (k1 + 1)) / (tf(qi, D) + k1 · (1 - b 
 **Parameters:**
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `k1` | Term frequency saturation | 1.5 |
-| `b` | Document length normalization | 0.75 |
+| `k1` | Term frequency saturation | 2.5 |
+| `b` | Document length normalization | 0.0 |
 
 ### TF-IDF Cosine Similarity (`/search_body` Endpoint)
 ```
@@ -344,12 +372,6 @@ curl -X POST "http://104.198.58.119:8080/get_pageview" \
 
 - Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*
 - Page, L., et al. (1999). *The PageRank Citation Ranking: Bringing Order to the Web*
-
----
-
-## 👥 Authors
-
-Developed as part of the **Information Retrieval** course project.
 
 ---
 
