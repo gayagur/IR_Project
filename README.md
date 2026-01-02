@@ -1,192 +1,329 @@
 # 🔍 Wikipedia Search Engine
-> **Information Retrieval Course Project** | A high-performance full-text search engine for English Wikipedia.
+
+> **Information Retrieval Course Project** | A high-performance full-text search engine for English Wikipedia (6.3M articles)
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Flask](https://img.shields.io/badge/Framework-Flask-lightgrey.svg)
-![GCP](https://img.shields.io/badge/Storage-GCP%20Bucket-orange.svg)
+![GCP](https://img.shields.io/badge/Cloud-Google%20Cloud%20Platform-orange.svg)
+![Wikipedia](https://img.shields.io/badge/Corpus-Wikipedia%202021-green.svg)
 
 ---
+## 👥 Authors
+
+<div align="center">
+
+### ✨ Project Creators ✨
+
+
+  <tr>
+    <td align="center">
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Gaya%20Gur%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Gaya Gur"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Matias%20Guernik%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Matias Guernik"/>
+    </td>
+  </tr>
+
+
+<br/>
+
+<img src="https://img.shields.io/badge/📚%20Information%20Retrieval-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
+&nbsp;
+<img src="https://img.shields.io/badge/🎓%202024%2F2025-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
+
+</div>
+
+---
+
+
 
 ## 📖 Overview
-This project implements a complete search pipeline for the English Wikipedia corpus. It features multi-stage ranking, efficient inverted indexing, LSI (Latent Semantic Indexing) reranking, and a Flask-based REST API for real-time querying.
+
+A complete search pipeline for the English Wikipedia corpus featuring:
+- **Multi-signal ranking** combining text relevance, link analysis, and popularity metrics
+- **BM25 probabilistic ranking** with tuned parameters
+- **LSI reranking** on top-K results for semantic similarity
+- **6.3M documents** indexed across body, title, and anchor text
+- **Sub-second query latency** with lazy index loading
+- **RESTful API** for easy integration
 
 ---
 
-## 🏗️ Project Structure
-```text
-IR_Project/
-├── 🌐 search_frontend.py       # Flask web application & API endpoints
-├── ⚙️ search_runtime.py         # Search engine runtime & query processing
-├── ⚙️ config.py                 # Configuration & data paths
-├── 🗄️ inverted_index_gcp.py    # Inverted index with GCP storage support
-├── 🧪 text_processing.py       # Tokenization & preprocessing
-├── 📄 parser_utils.py          # Wikipedia XML parsing utilities
-├── 📂 indexing/                # Index building scripts
-│   └── build_indices.py        # Build body, title, and anchor indices
-├── ⚖️ ranking/                 # Ranking algorithms
-│   ├── bm25.py                 # BM25 ranking
-│   ├── lsi.py                  # LSI (Latent Semantic Indexing)
-│   ├── merge.py                # Ranking fusion
-│   └── tfidf_cosine.py         # TF-IDF cosine similarity
-├── 📊 experiments/             # Evaluation & tuning scripts
-│   ├── evaluate.py             # Core evaluation metrics (MAP@K, AP@K)
-│   ├── run_evaluation.py       # Main evaluation script
-│   ├── bm25_tuning.py          # BM25 parameter tuning
-│   ├── weight_tuning.py        # Ranking weight optimization
-│   └── compare_versions.py    # Version comparison & visualization
-├── 📋 queries_train.json       # Training queries with relevance judgments
-└── 📝 requirements.txt         # Python dependencies
+## 🏗️ Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         User Query                               │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Flask API (search_frontend.py)                │
+│                                                                  │
+│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor + LSI)│
+│  /search_body ─► TF-IDF Cosine on article text                   │
+│  /search_title ► Title matching                                  │
+│  /search_anchor► Anchor text search                              │
+│  /search_lsi ──► LSI-only search                                 │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Ranking Engine                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐            │
+│  │  Body    │ │  Title   │ │  Anchor  │ │   LSI    │            │
+│  │  BM25    │ │  Binary  │ │  Binary  │ │ Rerank   │            │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘            │
+│  ┌──────────┐ ┌──────────┐                                       │
+│  │ PageRank │ │ PageView │                                       │
+│  │  Boost   │ │  Boost   │                                       │
+│  └──────────┘ └──────────┘                                       │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    GCP Storage (Indices)                         │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐  │
+│  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
+│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, Norms│  │
+│  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ LSI Index (optional) - lsi_vectors, svd_components        │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Key Components
-
-### 1. Search Frontend (`search_frontend.py`)
-
-Provides multiple endpoints for different search strategies:
-
-* **`/search`**: 🏆 **Main Engine** - Combines BM25, Title, Anchor, LSI reranking, PageRank, and Pageviews.
-* **`/search_with_weights`**: Custom weight configuration for fine-tuning.
-* **`/search_body`**: TF-IDF Cosine similarity on article text.
-* **`/search_title`**: Binary ranking based on article titles.
-* **`/search_anchor`**: Ranking based on incoming link text.
-* **`/search_lsi`**: LSI-only search (for testing).
-
-### 2. Search Runtime (`search_runtime.py`)
-
-Core search engine implementation:
-* **Multi-signal ranking**: BM25, Title, Anchor, and LSI
-* **LSI reranking**: Optimized reranking on top-K results
-* **Weighted fusion**: Configurable weights for each signal
-* **PageRank & PageView boosting**: Quality signals integration
-
-### 3. Ranking Algorithms
-
-| Algorithm | Module | Description |
-| --- | --- | --- |
-| **BM25** | `ranking/bm25.py` | Probabilistic ranking function |
-| **LSI** | `ranking/lsi.py` | Latent Semantic Indexing with reranking |
-| **TF-IDF** | `ranking/tfidf_cosine.py` | Vector space model |
-| **Merge** | `ranking/merge.py` | Weighted ranking fusion |
-
-### 4. Indexing Engine (`indexing/build_indices.py`)
-
-Builds three specialized indices for fast retrieval:
-
-| Index Type | Description | Weight in `/search` |
-| --- | --- | --- |
-| **Body Index** | Full-text content using BM25 | Primary (configurable) |
-| **Title Index** | Exact and partial title matching | 0.35 (configurable) |
-| **Anchor Index** | Text from incoming Wikipedia links | 0.25 (configurable) |
-
-### 5. LSI Configuration
-
-* **LSI Reranking**: Only reranks top-K results (default: 100) for efficiency
-* **Configurable**: `LSI_TOP_K` in `config.py` controls reranking depth
-* **Weight control**: Set `LSI_WEIGHT = 0.0` to disable LSI entirely
+## 📁 Project Structure
+```
+IR_Project/
+├── search_frontend.py        # Flask REST API
+├── search_runtime.py         # Search engine core logic
+├── config.py                 # Configuration & weights
+├── inverted_index_gcp.py     # Inverted index with GCP support
+├── text_processing.py        # Tokenization & stemming
+├── parser_utils.py           # Wikipedia XML parsing utilities
+│
+├── indexing/
+│   └── build_indices.py      # Index construction pipeline
+│
+├── ranking/
+│   ├── bm25.py               # BM25 implementation
+│   ├── lsi.py                # LSI (Latent Semantic Indexing)
+│   ├── tfidf_cosine.py       # TF-IDF cosine similarity
+│   └── merge.py              # Score fusion
+│
+└── experiments/
+    ├── evaluate.py           # MAP@K, Precision, Recall metrics
+    ├── run_evaluation.py     # Main evaluation script
+    ├── bm25_tuning.py        # BM25 parameter optimization
+    ├── weight_tuning.py      # Multi-signal weight optimization
+    └── compare_versions.py   # Version comparison & visualization
+```
 
 ---
 
-## 🛠️ Usage
+## 🚀 API Endpoints
 
-### 📦 Installation
-
+### Main Search (Recommended)
 ```bash
-# Install dependencies
+GET /search?query=<query>
+```
+Multi-signal fusion combining all ranking signals with LSI reranking.
+
+**Response:**
+```json
+[
+  [12345, "Article Title"],
+  [67890, "Another Article"],
+  ...
+]
+```
+
+### Specialized Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + LSI + PageRank + PageView |
+| `/search_body` | GET | TF-IDF Cosine similarity on article body |
+| `/search_title` | GET | Binary title matching |
+| `/search_anchor` | GET | Binary anchor text search |
+| `/search_lsi` | GET | LSI-only search (for testing) |
+| `/search_with_weights` | GET | Custom weight configuration |
+| `/get_pagerank` | POST | Get PageRank scores for doc IDs |
+| `/get_pageview` | POST | Get page view counts for doc IDs |
+
+### Custom Weight Search
+```bash
+GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=0.35&anchor_weight=0.25&lsi_weight=0.25&pagerank_boost=0.15
+```
+
+---
+
+## ⚙️ Ranking Algorithms
+
+### BM25 Scoring (Main Search - Body Component)
+```
+score(D, Q) = Σ IDF(qi) · (tf(qi, D) · (k1 + 1)) / (tf(qi, D) + k1 · (1 - b + b · |D|/avgdl))
+```
+
+**Parameters:**
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `k1` | Term frequency saturation | 2.5 |
+| `b` | Document length normalization | 0.0 |
+
+### LSI (Latent Semantic Indexing)
+LSI reranking on top-K results for semantic similarity:
+- Projects queries and documents into latent semantic space
+- Uses TruncatedSVD with 100 components
+- Only reranks top-K results (default: 100) for efficiency
+- Can be disabled by setting `LSI_WEIGHT = 0.0`
+
+**Configuration:**
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `LSI_TOP_K` | Number of results to rerank | 100 |
+| `LSI_WEIGHT` | LSI weight in fusion | 0.25 |
+| `LSI_N_COMPONENTS` | Latent dimensions | 100 |
+
+### TF-IDF Cosine Similarity (`/search_body` Endpoint)
+```
+score(D, Q) = (D · Q) / (||D|| · ||Q||)
+```
+Where D and Q are TF-IDF weighted vectors.
+
+### Binary Scoring (Title & Anchor)
+```
+score(D, Q) = number of query terms found in document
+```
+
+### Multi-Signal Fusion (`/search` Endpoint)
+```python
+# Step 1: Initial ranking (without LSI)
+initial_score = (
+    body_weight * BM25_body(q, d) +
+    title_weight * binary_title(q, d) +
+    anchor_weight * binary_anchor(q, d) +
+    pagerank_boost * log(1 + pagerank(d)) +
+    pageview_boost * log(1 + pageviews(d))
+)
+
+# Step 2: LSI reranking on top-K
+if LSI_WEIGHT > 0:
+    top_k_results = get_top_k(initial_score, k=LSI_TOP_K)
+    lsi_score = LSI_similarity(q, d)
+    final_score = blend(initial_score, lsi_score, LSI_WEIGHT)
+```
+
+**Default Weights:**
+| Signal | Weight | Method |
+|--------|--------|--------|
+| Body | 1.0 | BM25 |
+| Title | 0.35 | Binary |
+| Anchor | 0.25 | Binary |
+| LSI | 0.25 | Reranking (top-K) |
+| PageRank | 0.15 | Log boost |
+| PageView | 0.10 | Log boost |
+
+---
+
+## 📊 Index Statistics
+
+| Index | Terms | Documents | Size |
+|-------|-------|-----------|------|
+| Body | 28M | 6.3M | ~15 GB |
+| Title | 1.7M | 6.3M | ~500 MB |
+| Anchor | 2.4M | 5.8M | ~1.1 GB |
+| LSI | 50K | 6.3M | ~500 MB (optional) |
+| PageRank | - | 6.3M | ~50 MB |
+| PageViews | - | 10.7M | ~100 MB |
+
+---
+
+## 🛠️ Installation & Setup
+
+### Prerequisites
+```bash
 pip install -r requirements.txt
 ```
 
-### 🔨 Building Indices
-
-To process the Wikipedia dump and build the indices locally or on GCP:
-
+### Running Locally
 ```bash
-python -m indexing.build_indices --dump path/to/enwiki-latest.xml.bz2 --build all
-```
+# Set up configuration
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/credentials.json"
 
-### 💻 Running the Search Engine
-
-```bash
+# Start server
 python search_frontend.py
 ```
 
-The server will start at `http://127.0.0.1:8050` (local) or `http://0.0.0.0:8080` (production).
-
-### 🔍 Example Queries
-
+### GCP Deployment
 ```bash
-# Main search (Weighted Fusion)
-curl "http://localhost:8080/search?query=artificial+intelligence"
+# SSH to instance
+gcloud compute ssh <instance-name> --zone=us-central1-c
 
-# Search with custom weights
-curl "http://localhost:8080/search_with_weights?query=python&body_weight=1.0&title_weight=0.5&lsi_weight=0.25"
+# Activate environment
+source ~/venv/bin/activate
+cd ~/IR_Project
 
-# Title-only search
-curl "http://localhost:8080/search_title?query=python+programming"
+# Run server
+nohup python search_frontend.py > ~/frontend.log 2>&1 &
 ```
-
-### ⚙️ Configuration
-
-Edit `config.py` to customize:
-* **Ranking weights**: `BODY_WEIGHT`, `TITLE_WEIGHT`, `ANCHOR_WEIGHT`, `LSI_WEIGHT`
-* **LSI settings**: `LSI_TOP_K` (number of results to rerank)
-* **BM25 parameters**: `BM25_K1`, `BM25_B`
-* **Boost weights**: `PAGERANK_BOOST`, `PAGEVIEW_BOOST`
 
 ---
 
-## 📈 Evaluation
+## 📈 Evaluation & Tuning
 
-The `experiments/` directory includes comprehensive evaluation tools:
+### Running Evaluation
+```bash
+python experiments/run_evaluation.py --base-url http://<SERVER_IP>:8080
+```
+
+### BM25 Parameter Tuning
+```bash
+python experiments/bm25_tuning.py --base-url http://<SERVER_IP>:8080
+```
+Outputs heatmaps and sensitivity plots to `experiments/bm25_tuning_results/`.
+
+### Weight Tuning
+```bash
+python experiments/weight_tuning.py --base-url http://<SERVER_IP>:8080
+```
+Tests hundreds of weight combinations and generates visualization reports.
+
+### Version Comparison
+```bash
+python experiments/compare_versions.py --base-url http://<SERVER_IP>:8080
+```
+Compares different search engine configurations and generates comparison visualizations.
 
 ### Metrics
-* **MAP@K**: Mean Average Precision at K
-* **Precision@K**: Precision at K
-* **Recall@K**: Recall at K
-* **F1@K**: F1 score at K
-* **Harmonic Mean**: Combined metric (Precision@5, F1@30)
-
-### Scripts
-
-```bash
-# Run evaluation with default weights
-python experiments/run_evaluation.py
-
-# Tune BM25 parameters
-python experiments/bm25_tuning.py --queries queries_train.json
-
-# Optimize ranking weights
-python experiments/weight_tuning.py
-
-# Compare different configurations
-python experiments/compare_versions.py
-```
-
-### Results
-* Evaluation results are saved in `experiments/*_tuning_results/`
-* Visualizations (graphs, heatmaps) are generated automatically
-* JSON results files contain detailed metrics
+- **MAP@10** - Mean Average Precision at 10
+- **MAP@5** - Mean Average Precision at 5
+- **Precision@5** - Precision at rank 5
+- **F1@30** - F1 score at rank 30
+- **Harmonic Mean** - Combined P@5 and F1@30
 
 ---
 
-## 📂 Data Requirements
-
-Ensure the following structure in your project root:
-
-```text
-IR_Project/
-├── queries_train.json          # Training queries (required for evaluation)
-├── data/                       # Optional: local data files
-├── indices/                    # Inverted index files (generated)
-└── aux/                        # Auxiliary files (generated)
-    ├── doc_norms.pkl           # TF-IDF norms
-    ├── doc_len.pkl             # Document lengths
-    ├── avgdl.txt               # Average document length
-    ├── titles.pkl              # Document titles mapping
-    ├── pagerank.pkl            # PageRank scores
-    ├── pageviews.pkl           # Page view counts
-    └── lsi/                    # LSI index files (optional)
+## 📂 Data Directory Structure
+```
+data/
+├── indices/
+│   ├── body/           # Body inverted index
+│   │   ├── body.pkl
+│   │   └── *.bin       # Posting lists
+│   ├── title/          # Title inverted index
+│   └── anchor/         # Anchor text inverted index
+│
+└── aux/
+    ├── doc_norms.pkl   # TF-IDF normalization factors
+    ├── doc_len.pkl     # Document lengths (for BM25)
+    ├── avgdl.txt       # Average document length
+    ├── pagerank.pkl    # PageRank scores (6.3M entries)
+    ├── pageviews.pkl   # Page view counts
+    ├── titles.pkl      # doc_id → title mapping
+    └── lsi/            # LSI index files (optional)
         ├── lsi_vectors.pkl
         ├── svd_components.pkl
         ├── term_to_idx.pkl
@@ -195,31 +332,112 @@ IR_Project/
 
 ---
 
-## 📦 Dependencies
+## 🔧 Configuration
 
-Core dependencies (see `requirements.txt`):
-* **Flask**: Web framework
-* **pandas, numpy**: Data processing
-* **scikit-learn**: LSI implementation
-* **google-cloud-storage**: GCP integration
-* **mwparserfromhell**: Wikipedia parsing
+Edit `config.py` to customize:
+```python
+# Index paths
+BODY_INDEX_DIR = "indices/body"
+TITLE_INDEX_DIR = "indices/title"
+ANCHOR_INDEX_DIR = "indices/anchor"
 
-Evaluation dependencies:
-* **requests**: HTTP client for testing
-* **matplotlib**: Visualization
+# BM25 parameters
+BM25_K1 = 2.5
+BM25_B = 0.0
+
+# LSI configuration
+LSI_TOP_K = 100          # Number of results to rerank
+LSI_WEIGHT = 0.25        # LSI weight (0.0 to disable)
+LSI_N_COMPONENTS = 100   # Latent dimensions
+
+# Ranking weights
+BODY_WEIGHT = 1.0
+TITLE_WEIGHT = 0.35
+ANCHOR_WEIGHT = 0.25
+LSI_WEIGHT = 0.25
+PAGERANK_BOOST = 0.15
+PAGEVIEW_BOOST = 0.10
+
+# Performance
+MAX_QUERY_TERMS = 10
+RESULTS_LIMIT = 100
+```
 
 ---
 
-## 🎯 Features
+## 📊 Performance
 
-* ✅ **Multi-signal ranking**: BM25, Title, Anchor, LSI
-* ✅ **LSI reranking**: Efficient top-K reranking
-* ✅ **Configurable weights**: Easy parameter tuning
-* ✅ **PageRank & PageView integration**: Quality signals
-* ✅ **GCP support**: Cloud storage integration
-* ✅ **Comprehensive evaluation**: Multiple metrics and visualization
-* ✅ **Optimized performance**: Vectorized operations, lazy loading
+| Metric | Value |
+|--------|-------|
+| Average Query Latency | ~0.5s |
+| Index Load Time | ~2 min |
+| Memory Usage | ~8 GB |
+| Throughput | ~10 queries/sec |
+| LSI Reranking Time | ~50ms (on top-100) |
 
 ---
 
-**Developed as part of the Information Retrieval course project.**
+## 🧪 Example Queries
+
+> Replace `<SERVER_IP>` with your instance IP (e.g., `104.198.58.119`)
+```bash
+# Main search (BM25 + all signals + LSI reranking)
+curl "http://<SERVER_IP>:8080/search?query=machine+learning"
+
+# Body search (TF-IDF Cosine)
+curl "http://<SERVER_IP>:8080/search_body?query=artificial+intelligence"
+
+# Title search (Binary)
+curl "http://<SERVER_IP>:8080/search_title?query=python+programming"
+
+# LSI-only search
+curl "http://<SERVER_IP>:8080/search_lsi?query=deep+learning"
+
+# Custom weights
+curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
+```
+
+### Live Examples (Current Deployment)
+```bash
+# Main search (BM25 + all signals + LSI reranking)
+curl "http://104.198.58.119:8080/search?query=machine+learning"
+
+# Body search (TF-IDF Cosine)
+curl "http://104.198.58.119:8080/search_body?query=artificial+intelligence"
+
+# Title search (Binary)
+curl "http://104.198.58.119:8080/search_title?query=python+programming"
+
+# Anchor search (Binary)
+curl "http://104.198.58.119:8080/search_anchor?query=united+states"
+
+# LSI-only search
+curl "http://104.198.58.119:8080/search_lsi?query=deep+learning"
+
+# Custom weights
+curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
+
+# Get PageRank for documents
+curl -X POST "http://104.198.58.119:8080/get_pagerank" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
+
+# Get PageViews for documents
+curl -X POST "http://104.198.58.119:8080/get_pageview" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
+```
+
+---
+
+## 📚 References
+
+- Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*
+- Page, L., et al. (1999). *The PageRank Citation Ranking: Bringing Order to the Web*
+- Deerwester, S., et al. (1990). *Indexing by Latent Semantic Analysis*
+
+---
+
+## 📄 License
+
+This project is for educational purposes only.

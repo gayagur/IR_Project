@@ -152,6 +152,91 @@ class LSISearcher:
         
         return res
 
+    def rerank(
+        self,
+        query_tokens: List[str],
+        candidate_doc_ids: List[int],
+        *,
+        max_terms: int = 50,
+    ) -> List[Tuple[int, float]]:
+        """
+        Rerank a list of candidate documents using LSI.
+        Only computes scores for the provided candidate documents (optimized for speed).
+        
+        Args:
+            query_tokens: List of query terms
+            candidate_doc_ids: List of document IDs to rerank
+            max_terms: Maximum number of query terms to use
+            
+        Returns:
+            List of (doc_id, score) tuples, sorted by score descending
+        """
+        if not query_tokens or not self.term_to_idx or self.lsi_vectors is None:
+            return []
+        
+        if not candidate_doc_ids:
+            return []
+        
+        # Limit query terms
+        query_terms = list(dict.fromkeys(query_tokens[:max_terms]))
+        
+        # Build query vector in term space (binary: 1 if term in query, 0 otherwise)
+        query_term_vector = np.zeros(self.n_terms)
+        for term in query_terms:
+            if term in self.term_to_idx:
+                term_idx = self.term_to_idx[term]
+                query_term_vector[term_idx] = 1.0
+        
+        # Normalize query vector
+        query_norm = np.linalg.norm(query_term_vector)
+        if query_norm == 0:
+            return []
+        query_term_vector = query_term_vector / query_norm
+        
+        # Project query into latent space: query_latent = svd_components @ query_term_vector
+        query_latent = self.svd_components @ query_term_vector  # Shape: (n_components,)
+        
+        # Normalize query in latent space
+        query_latent_norm = np.linalg.norm(query_latent)
+        if query_latent_norm == 0:
+            return []
+        query_latent = query_latent / query_latent_norm
+        
+        # Get LSI vectors only for candidate documents (optimized: only extract needed vectors)
+        candidate_indices = []
+        candidate_doc_id_list = []
+        for doc_id in candidate_doc_ids:
+            if doc_id in self.doc_to_idx:
+                idx = self.doc_to_idx[doc_id]
+                if idx < len(self.lsi_vectors):
+                    candidate_indices.append(idx)
+                    candidate_doc_id_list.append(doc_id)
+        
+        if not candidate_indices:
+            return []
+        
+        # Extract LSI vectors for candidates only (vectorized, fast)
+        candidate_vectors = self.lsi_vectors[candidate_indices]  # Shape: (n_candidates, n_components)
+        
+        # Normalize candidate vectors (vectorized)
+        candidate_norms = np.linalg.norm(candidate_vectors, axis=1, keepdims=True)
+        candidate_norms[candidate_norms == 0] = 1  # Avoid division by zero
+        candidate_vectors_norm = candidate_vectors / candidate_norms
+        
+        # Compute cosine similarity for candidate documents only (vectorized matrix multiplication)
+        similarities = candidate_vectors_norm @ query_latent  # Shape: (n_candidates,)
+        
+        # Build results list
+        res = [
+            (int(doc_id), float(score))
+            for doc_id, score in zip(candidate_doc_id_list, similarities)
+        ]
+        
+        # Sort by score descending
+        res.sort(key=lambda x: (-x[1], x[0]))
+        
+        return res
+
 
 def build_lsi_index(
     body_index: InvertedIndex,
