@@ -82,6 +82,13 @@ LSI_MAX_TERMS = 50000
 LSI_MAX_DOCS = None  # None = all documents
 
 # ============================================================================
+# BM25 parameters
+# ============================================================================
+# BM25 scoring parameters (tuned for best MAP@10 performance)
+BM25_K1 = 2.5  # Term frequency saturation parameter (default: 2.5)
+BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no normalization)
+
+# ============================================================================
 # Ranking weights for signal merging
 # ============================================================================
 # Weights for merging different search signals in /search endpoint
