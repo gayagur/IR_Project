@@ -311,14 +311,19 @@ def main():
     
     parser = argparse.ArgumentParser(description="Tune BM25 parameters")
     parser.add_argument("--base-url", default=BASE_URL, help="Base URL")
-    parser.add_argument("--queries", default="test_queries.json", help="Queries file")
+    parser.add_argument("--queries", default="queries_train.json", help="Queries file")
     parser.add_argument("--output-dir", default="experiments/bm25_tuning_results", help="Output dir")
     args = parser.parse_args()
     
-    # Load queries
+    # Load queries - use BASE_DIR from config for queries
+    import config
     queries_path = Path(args.queries)
-    if not queries_path.is_absolute() and not queries_path.exists():
-        queries_path = parent_dir / args.queries
+    if not queries_path.is_absolute():
+        # Try relative to queries directory (root by default)
+        queries_path = config.QUERIES_DIR / args.queries
+        if not queries_path.exists():
+            # Fallback to parent_dir for backward compatibility
+            queries_path = parent_dir / args.queries
     
     if not queries_path.exists():
         print(f"❌ {queries_path} not found!")

@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 INDICES_DIR = BASE_DIR / "indices"
 AUX_DIR = BASE_DIR / "aux"
+QUERIES_DIR = BASE_DIR  # Queries files are in the root directory
 
 # ============================================================================
 # GCP configuration (only needed if you read source data from GCS or store outputs on GCS)
