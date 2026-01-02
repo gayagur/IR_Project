@@ -161,6 +161,57 @@ class SearchEngine:
             return []
         return self.body_lsi.search(q_tokens, top_n=top_n)
 
+    def rerank_with_lsi(
+        self,
+        q_tokens: List[str],
+        candidate_results: List[Tuple[int, float]],
+        *,
+        top_k: int = 100,
+        lsi_weight: float = 1.0,
+    ) -> List[Tuple[int, float]]:
+        """
+        Rerank top K candidate results using LSI and combine with original scores.
+        Optimized: only reranks the top K candidates, then merges with original scores.
+        
+        Args:
+            q_tokens: Query tokens
+            candidate_results: List of (doc_id, score) tuples to rerank
+            top_k: Number of top candidates to rerank
+            lsi_weight: Weight to apply to LSI scores (default: 1.0, meaning replace original)
+            
+        Returns:
+            Reranked list of (doc_id, score) tuples
+        """
+        if self.body_lsi is None or not candidate_results:
+            return candidate_results
+        
+        # Take top K candidates
+        top_candidates = candidate_results[:top_k]
+        candidate_doc_ids = [doc_id for doc_id, _ in top_candidates]
+        
+        # Rerank with LSI (only on top K candidates - much faster)
+        lsi_reranked = self.body_lsi.rerank(q_tokens, candidate_doc_ids)
+        
+        # Create a mapping from doc_id to LSI score for fast lookup
+        lsi_scores = {doc_id: score for doc_id, score in lsi_reranked}
+        
+        # Combine: blend LSI scores with original scores based on lsi_weight
+        combined = []
+        for doc_id, original_score in candidate_results:
+            if doc_id in lsi_scores:
+                # Blend LSI score with original score
+                lsi_score = lsi_scores[doc_id]
+                blended_score = original_score * (1.0 - lsi_weight) + lsi_score * lsi_weight
+                combined.append((doc_id, blended_score))
+            else:
+                # Keep original score for documents not in top K
+                combined.append((doc_id, original_score))
+        
+        # Sort by score descending
+        combined.sort(key=lambda x: (-x[1], x[0]))
+        
+        return combined
+
     def _count_index_matches(
         self,
         q_tokens: List[str],

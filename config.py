@@ -80,6 +80,7 @@ DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR /
 LSI_N_COMPONENTS = 100
 LSI_MAX_TERMS = 50000
 LSI_MAX_DOCS = None  # None = all documents
+LSI_TOP_K = 100  # Number of top results to rerank with LSI
 
 # ============================================================================
 # BM25 parameters

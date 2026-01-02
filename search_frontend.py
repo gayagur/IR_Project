@@ -52,50 +52,56 @@ def search():
             return jsonify(res)
 
         # Candidates + scores from multiple signals
-        # Run searches in parallel for faster performance
+        # Run searches in parallel for faster performance (without LSI - LSI will rerank later)
         print("[SEARCH] Searching all indices in parallel...")
         from concurrent.futures import ThreadPoolExecutor
         import config
         
-        # Determine number of workers based on whether LSI is available
-        max_workers = 4 if engine.body_lsi and getattr(config, 'LSI_WEIGHT', 0.25) > 0 else 3
+        # Check LSI weight - if 0, skip LSI entirely
+        lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
+        use_lsi = engine.body_lsi is not None and lsi_weight > 0
         
+        # Run body/title/anchor searches in parallel (no LSI search)
+        max_workers = 3
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all search tasks
             future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
             future_title = executor.submit(engine.search_title_count, q_tokens, top_n=5000)
             future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=5000)
-            
-            # Submit LSI search if available
-            lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
-            future_lsi = None
-            if engine.body_lsi and lsi_weight > 0:
-                future_lsi = executor.submit(engine.search_body_lsi, q_tokens, top_n=200)
             
             # Wait for all to complete
             body_ranked = future_body.result()
             title_ranked = future_title.result()
             anchor_ranked = future_anchor.result()
-            lsi_ranked = future_lsi.result() if future_lsi else None
         
         print(f"[SEARCH] Body results: {len(body_ranked)}")
         print(f"[SEARCH] Title results: {len(title_ranked)}")
         print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
-        if lsi_ranked:
-            print(f"[SEARCH] LSI results: {len(lsi_ranked)}")
 
-        print("[SEARCH] Merging signals...")
-        # NOTE: merge_signals uses config.py weights by default (backward-compatible)
-        # Custom weights are only used when explicitly passed via /search_with_weights endpoint
+        print("[SEARCH] Merging signals (without LSI)...")
+        # Merge without LSI first to get initial ranking
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
-            lsi_ranked=lsi_ranked,
-            top_n=100,
-            # Not passing custom weights - uses config.py values (default behavior)
+            lsi_ranked=None,  # No LSI in initial merge
+            top_n=500,  # Get more candidates for reranking
         )
-        print(f"[SEARCH] Merged results: {len(merged)}")
+        print(f"[SEARCH] Merged results (before LSI rerank): {len(merged)}")
+        
+        # Rerank top K with LSI if available and weight > 0
+        if use_lsi:
+            lsi_top_k = getattr(config, 'LSI_TOP_K', 100)
+            print(f"[SEARCH] Reranking top {lsi_top_k} results with LSI...")
+            merged = engine.rerank_with_lsi(
+                q_tokens,
+                merged,
+                top_k=lsi_top_k,
+                lsi_weight=lsi_weight,  # Use LSI weight from config
+            )
+            print(f"[SEARCH] Reranked results: {len(merged)}")
+        
+        # Take final top 100
+        merged = merged[:100]
 
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
         print(f"[SEARCH] Final results: {len(res)}")
@@ -329,37 +335,47 @@ def search_with_weights():
         pr_boost = float(request.args.get('pagerank_boost', getattr(config, 'PAGERANK_BOOST', 0.15)))
         pv_boost = float(request.args.get('pageview_boost', getattr(config, 'PAGEVIEW_BOOST', 0.10)))
         
-        # Run searches in parallel
+        # Run searches in parallel (without LSI - LSI will rerank later)
         from concurrent.futures import ThreadPoolExecutor
-        max_workers = 4 if engine.body_lsi and lsi_weight > 0 else 3
+        max_workers = 3
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
             future_title = executor.submit(engine.search_title_count, q_tokens, top_n=5000)
             future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=5000)
-            future_lsi = None
-            if engine.body_lsi and lsi_weight > 0:
-                future_lsi = executor.submit(engine.search_body_lsi, q_tokens, top_n=200)
             
             body_ranked = future_body.result()
             title_ranked = future_title.result()
             anchor_ranked = future_anchor.result()
-            lsi_ranked = future_lsi.result() if future_lsi else None
         
-        # Merge with custom weights
+        # Merge without LSI first
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
-            lsi_ranked=lsi_ranked,
-            top_n=100,
+            lsi_ranked=None,  # No LSI in initial merge
+            top_n=500,  # Get more candidates for reranking
             body_weight=body_weight,
             title_weight=title_weight,
             anchor_weight=anchor_weight,
-            lsi_weight=lsi_weight,
+            lsi_weight=0.0,  # No LSI in merge
             pagerank_boost=pr_boost,
             pageview_boost=pv_boost,
         )
+        
+        # Rerank top K with LSI if available and weight > 0
+        use_lsi = engine.body_lsi is not None and lsi_weight > 0
+        if use_lsi:
+            lsi_top_k = getattr(config, 'LSI_TOP_K', 100)
+            merged = engine.rerank_with_lsi(
+                q_tokens,
+                merged,
+                top_k=lsi_top_k,
+                lsi_weight=lsi_weight,  # Use custom LSI weight
+            )
+        
+        # Take final top 100
+        merged = merged[:100]
         
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
     except Exception as e:
