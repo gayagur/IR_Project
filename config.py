@@ -18,52 +18,82 @@ PROJECT_ID = "ir-project-481821"
 BUCKET_NAME = "matiasgaya333"
 
 # ============================================================================
+# Server configuration
+# ============================================================================
+# IP address and port of the GCP instance running the search engine
+INSTANCE_IP = "104.198.58.119"
+INSTANCE_PORT = 8080
+# Base URL for the search engine server
+BASE_URL = f"http://{INSTANCE_IP}:{INSTANCE_PORT}"
+
+# ============================================================================
 # Input data path
 # ============================================================================
 # Examples:
 #   Local XML dump: "/path/to/enwiki.xml.bz2"
 #   Local parquet dir: "/path/to/wikidata20210801_preprocessed/"
 #   GCS parquet dir: "gs://<bucket>/raw/wikidata20210801_preprocessed/"
-RAW_DATA_PATH = "gs://wikidata20210801_preprocessed/"
+RAW_DATA_PATH = "gs://matiasgaya333/raw/wikidata20210801_preprocessed"
 
 # ============================================================================
 # Storage mode for indices
 # ============================================================================
 # Recommended: keep indices on LOCAL disk on your VM/Dataproc master, and only use GCS as the input source.
 # If you really need to store indices on GCS, set WRITE_TO_GCS = True AND ensure your InvertedIndex uses bucket_name.
-WRITE_TO_GCS = False
+WRITE_TO_GCS =  False
 
-# When WRITE_TO_GCS=True, we use bucket-relative paths (NO 'gs://...' prefix) because inverted_index_gcp.py
-# opens blobs relative to bucket root.
+# Set READ_FROM_GCS = True to read all indices and auxiliary files from GCS at runtime.
+# This is useful when running the server on a local machine but indices are stored in GCS.
+READ_FROM_GCS = False
+
+# When WRITE_TO_GCS=True or READ_FROM_GCS=True, we use bucket-relative paths (NO 'gs://...' prefix) 
+# because inverted_index_gcp.py opens blobs relative to bucket root.
 GCS_INDICES_DIR = "indices"
 GCS_AUX_DIR = "aux"
 
+# Determine if we should use GCS paths (either for writing OR reading from GCS)
+USE_GCS_PATHS = WRITE_TO_GCS or READ_FROM_GCS
+
 # Index directories
-BODY_INDEX_DIR = (GCS_INDICES_DIR + "/body") if WRITE_TO_GCS else (INDICES_DIR / "body")
-TITLE_INDEX_DIR = (GCS_INDICES_DIR + "/title") if WRITE_TO_GCS else (INDICES_DIR / "title")
-ANCHOR_INDEX_DIR = (GCS_INDICES_DIR + "/anchor") if WRITE_TO_GCS else (INDICES_DIR / "anchor")
+BODY_INDEX_DIR = (GCS_INDICES_DIR + "/body") if USE_GCS_PATHS else (INDICES_DIR / "body")
+TITLE_INDEX_DIR = (GCS_INDICES_DIR + "/title") if USE_GCS_PATHS else (INDICES_DIR / "title")
+ANCHOR_INDEX_DIR = (GCS_INDICES_DIR + "/anchor") if USE_GCS_PATHS else (INDICES_DIR / "anchor")
 
 # Auxiliary file paths
-DOC_NORMS_PATH = (GCS_AUX_DIR + "/doc_norms.pkl") if WRITE_TO_GCS else (AUX_DIR / "doc_norms.pkl")
-DOC_LEN_PATH = (GCS_AUX_DIR + "/doc_len.pkl") if WRITE_TO_GCS else (AUX_DIR / "doc_len.pkl")
-AVGDL_PATH = (GCS_AUX_DIR + "/avgdl.txt") if WRITE_TO_GCS else (AUX_DIR / "avgdl.txt")
-TITLES_PATH = (GCS_AUX_DIR + "/titles.pkl") if WRITE_TO_GCS else (AUX_DIR / "titles.pkl")
+DOC_NORMS_PATH = (GCS_AUX_DIR + "/doc_norms.pkl") if USE_GCS_PATHS else (AUX_DIR / "doc_norms.pkl")
+DOC_LEN_PATH = (GCS_AUX_DIR + "/doc_len.pkl") if USE_GCS_PATHS else (AUX_DIR / "doc_len.pkl")
+AVGDL_PATH = (GCS_AUX_DIR + "/avgdl.txt") if USE_GCS_PATHS else (AUX_DIR / "avgdl.txt")
+TITLES_PATH = (GCS_AUX_DIR + "/titles.pkl") if USE_GCS_PATHS else (AUX_DIR / "titles.pkl")
 
-PAGERANK_PATH = (GCS_AUX_DIR + "/pagerank.pkl") if WRITE_TO_GCS else (AUX_DIR / "pagerank.pkl")
-PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if WRITE_TO_GCS else (AUX_DIR / "pageviews.pkl")
+PAGERANK_PATH = (GCS_AUX_DIR + "/pagerank.pkl") if USE_GCS_PATHS else (AUX_DIR / "pagerank.pkl")
+PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if USE_GCS_PATHS else (AUX_DIR / "pageviews.pkl")
 
 # ============================================================================
 # LSI configuration (optional)
 # ============================================================================
-LSI_DIR = (GCS_AUX_DIR + "/lsi") if WRITE_TO_GCS else (AUX_DIR / "lsi")
-LSI_VECTORS_PATH = (LSI_DIR + "/lsi_vectors.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "lsi_vectors.pkl")
-LSI_SVD_COMPONENTS_PATH = (LSI_DIR + "/svd_components.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "svd_components.pkl")
-TERM_TO_IDX_PATH = (LSI_DIR + "/term_to_idx.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "term_to_idx.pkl")
-DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if WRITE_TO_GCS else (AUX_DIR / "lsi" / "doc_to_idx.pkl")
+LSI_DIR = (GCS_AUX_DIR + "/lsi") if USE_GCS_PATHS else (AUX_DIR / "lsi")
+LSI_VECTORS_PATH = (LSI_DIR + "/lsi_vectors.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "lsi_vectors.pkl")
+LSI_SVD_COMPONENTS_PATH = (LSI_DIR + "/svd_components.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "svd_components.pkl")
+TERM_TO_IDX_PATH = (LSI_DIR + "/term_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "term_to_idx.pkl")
+DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "doc_to_idx.pkl")
 
 LSI_N_COMPONENTS = 100
 LSI_MAX_TERMS = 50000
 LSI_MAX_DOCS = None  # None = all documents
+
+# ============================================================================
+# Ranking weights for signal merging
+# ============================================================================
+# Weights for merging different search signals in /search endpoint
+# These can be tuned to optimize performance
+BODY_WEIGHT = 1.0      # BM25 body search weight
+TITLE_WEIGHT = 0.35    # Title match weight
+ANCHOR_WEIGHT = 0.25   # Anchor text weight
+LSI_WEIGHT = 0.25      # LSI weight (set to 0.0 to disable LSI)
+
+# PageRank and PageView boost weights (applied after merging)
+PAGERANK_BOOST = 0.15  # PageRank boost weight
+PAGEVIEW_BOOST = 0.10  # PageView boost weight
 
 # ============================================================================
 # Indexing parameters

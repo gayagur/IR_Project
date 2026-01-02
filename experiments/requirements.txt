@@ -1,5 +1,7 @@
 # Additional requirements for evaluation scripts
-requests>=2.28.0
+requests
+matplotlib
+numpy>=2.28.0
 matplotlib>=3.5.0
 numpy>=1.21.0
 

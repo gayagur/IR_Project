@@ -32,6 +32,7 @@ except Exception:
 
 
 PageTuple = Tuple[int, str, str]  # (wiki_id, title, body)
+PageTupleWithAnchors = Tuple[int, str, str, List[Dict]]  # (wiki_id, title, body, anchor_text_list)
 
 
 def _get_namespace(tag: str) -> str:
@@ -174,15 +175,21 @@ def _list_gcs_parquet_files(gcs_path: str) -> List[str]:
     return parquet_files
 
 
-def _iter_parquet_batches(local_parquet_file: str, *, batch_size: int = 10_000):
-    """Yield record batches from a local parquet file with minimal RAM use."""
+def _iter_parquet_batches(local_parquet_file: str, *, batch_size: int = 10_000, columns: Optional[List[str]] = None):
+    """Yield record batches from a local parquet file with minimal RAM use.
+    
+    Args:
+        local_parquet_file: Path to local parquet file
+        batch_size: Number of rows per batch
+        columns: Optional list of column names to read (more efficient if specified)
+    """
     if HAS_PYARROW:
         pf = pq.ParquetFile(local_parquet_file)
-        for batch in pf.iter_batches(batch_size=batch_size):
+        for batch in pf.iter_batches(batch_size=batch_size, columns=columns):
             yield batch
     elif HAS_PANDAS:
         # Fallback: loads whole file into memory (only suitable for small dev tests)
-        df = pd.read_parquet(local_parquet_file, engine="pyarrow" if HAS_PYARROW else "auto")
+        df = pd.read_parquet(local_parquet_file, engine="pyarrow" if HAS_PYARROW else "auto", columns=columns)
         yield df
     else:
         raise ImportError("Need either pyarrow (preferred) or pandas to read parquet.")
@@ -249,7 +256,6 @@ def page_iter_parquet(parquet_path: str) -> Generator[PageTuple, None, None]:
 
             if HAS_PYARROW:
                 pf = pq.ParquetFile(local_file)
-                schema_names = [n.lower() for n in pf.schema.names]
                 # Find columns by common names
                 for name in pf.schema.names:
                     nl = name.lower()
@@ -264,10 +270,18 @@ def page_iter_parquet(parquet_path: str) -> Generator[PageTuple, None, None]:
                     # Can't process this file
                     continue
 
-                for batch in pf.iter_batches(batch_size=10_000, columns=[id_col, title_col, body_col]):
-                    doc_ids = batch.column(0).to_pylist()
-                    titles = batch.column(1).to_pylist()
-                    bodies = batch.column(2).to_pylist()
+                # Use _iter_parquet_batches for efficient batch processing with column selection
+                for batch in _iter_parquet_batches(local_file, batch_size=10_000, columns=[id_col, title_col, body_col]):
+                    # Extract columns from batch
+                    if HAS_PYARROW and hasattr(batch, 'column'):  # PyArrow RecordBatch
+                        doc_ids = batch.column(0).to_pylist()
+                        titles = batch.column(1).to_pylist()
+                        bodies = batch.column(2).to_pylist()
+                    else:  # Pandas DataFrame fallback
+                        doc_ids = batch[id_col].tolist()
+                        titles = batch[title_col].tolist()
+                        bodies = batch[body_col].tolist()
+                    
                     for doc_id, title, body in zip(doc_ids, titles, bodies):
                         if doc_id is None or title is None or body is None:
                             continue
@@ -310,6 +324,198 @@ def page_iter_parquet(parquet_path: str) -> Generator[PageTuple, None, None]:
                         continue
                     yield wiki_id, t, b
 
+        finally:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                try:
+                    os.unlink(tmp_file_path)
+                except Exception:
+                    pass
+
+
+def page_iter_parquet_with_anchors(parquet_path: str) -> Generator[PageTupleWithAnchors, None, None]:
+    """Stream-iterate preprocessed parquet file(s) yielding (wiki_id, title, body, anchor_text_list).
+    
+    anchor_text_list is a list of dicts: [{'id': 1234, 'text': 'anchor text'}, ...]
+    If anchor_text column doesn't exist or is None, returns empty list.
+    
+    Supported:
+    - Local parquet file: /path/file.parquet
+    - Local directory: /path/dir/ (all *.parquet/*.parq)
+    - GCS parquet file: gs://bucket/path/file.parquet
+    - GCS directory: gs://bucket/path/dir/
+    """
+    is_gcs = parquet_path.startswith("gs://")
+    
+    parquet_files: List[str] = []
+    if is_gcs:
+        if parquet_path.endswith("/"):
+            parquet_files = _list_gcs_parquet_files(parquet_path)
+            if not parquet_files:
+                raise FileNotFoundError(f"No parquet files found in GCS directory: {parquet_path}")
+        else:
+            parquet_files = [parquet_path]
+    else:
+        p = Path(parquet_path)
+        if p.is_dir():
+            parquet_files = [str(f) for f in (list(p.glob("*.parquet")) + list(p.glob("*.parq")))]
+            parquet_files.sort()
+            if not parquet_files:
+                raise FileNotFoundError(f"No parquet files found in directory: {parquet_path}")
+        elif p.exists():
+            parquet_files = [str(p)]
+        else:
+            raise FileNotFoundError(f"Parquet file/directory not found: {parquet_path}")
+    
+    # For each parquet file, produce rows in a streaming fashion.
+    for parquet_file in parquet_files:
+        tmp_file_path: Optional[str] = None
+        try:
+            local_file = parquet_file
+            if is_gcs:
+                if not HAS_GCS:
+                    raise ImportError("google-cloud-storage is required for reading from GCS.")
+                import config
+                parts = parquet_file[5:].split("/", 1)
+                bucket_name = parts[0]
+                blob_path = parts[1]
+                
+                client = storage.Client(project=config.PROJECT_ID)
+                bucket = client.bucket(bucket_name)
+                blob = bucket.blob(blob_path)
+                if not blob.exists():
+                    continue
+                
+                tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+                tmp_file_path = tmp.name
+                tmp.close()
+                blob.download_to_filename(tmp_file_path)
+                local_file = tmp_file_path
+            
+            # Detect columns including anchor_text
+            id_col = title_col = body_col = anchor_col = None
+            
+            if HAS_PYARROW:
+                pf = pq.ParquetFile(local_file)
+                # Find columns by common names
+                for name in pf.schema.names:
+                    nl = name.lower()
+                    if id_col is None and nl in ("doc_id", "id", "wiki_id", "document_id"):
+                        id_col = name
+                    if title_col is None and nl in ("title", "page_title", "name"):
+                        title_col = name
+                    if body_col is None and nl in ("body", "text", "content", "article_text", "page_text"):
+                        body_col = name
+                    if anchor_col is None and nl in ("anchor_text", "anchors", "links", "wikilinks"):
+                        anchor_col = name
+                
+                if id_col is None or title_col is None or body_col is None:
+                    # Can't process this file
+                    continue
+                
+                # Build column list (anchor_text is optional)
+                columns = [id_col, title_col, body_col]
+                if anchor_col:
+                    columns.append(anchor_col)
+                
+                # Use _iter_parquet_batches for efficient batch processing
+                for batch in _iter_parquet_batches(local_file, batch_size=10_000, columns=columns):
+                    # Extract columns from batch
+                    if HAS_PYARROW and hasattr(batch, 'column'):  # PyArrow RecordBatch
+                        doc_ids = batch.column(0).to_pylist()
+                        titles = batch.column(1).to_pylist()
+                        bodies = batch.column(2).to_pylist()
+                        anchor_texts = batch.column(3).to_pylist() if anchor_col and len(batch.columns) > 3 else [None] * len(doc_ids)
+                    else:  # Pandas DataFrame fallback
+                        doc_ids = batch[id_col].tolist()
+                        titles = batch[title_col].tolist()
+                        bodies = batch[body_col].tolist()
+                        anchor_texts = batch[anchor_col].tolist() if anchor_col and anchor_col in batch.columns else [None] * len(doc_ids)
+                    
+                    for doc_id, title, body, anchor_text in zip(doc_ids, titles, bodies, anchor_texts):
+                        if doc_id is None or title is None or body is None:
+                            continue
+                        try:
+                            wiki_id = int(doc_id)
+                        except Exception:
+                            continue
+                        t = str(title)
+                        b = str(body)
+                        if wiki_id == 0 or not t or not b:
+                            continue
+                        
+                        # Parse anchor_text - can be list, string (JSON), or None
+                        anchor_list = []
+                        if anchor_text is not None:
+                            if isinstance(anchor_text, list):
+                                anchor_list = anchor_text
+                            elif isinstance(anchor_text, str):
+                                try:
+                                    import json
+                                    anchor_list = json.loads(anchor_text)
+                                except Exception:
+                                    # If not JSON, try to parse as Python literal
+                                    try:
+                                        anchor_list = eval(anchor_text) if anchor_text.strip() else []
+                                    except Exception:
+                                        anchor_list = []
+                            # If already a dict or other type, wrap in list
+                            elif isinstance(anchor_text, dict):
+                                anchor_list = [anchor_text]
+                        
+                        yield wiki_id, t, b, anchor_list
+                        
+            else:
+                # Pandas fallback (dev only)
+                if not HAS_PANDAS:
+                    raise ImportError("Need pyarrow (preferred) or pandas to read parquet.")
+                df = pd.read_parquet(local_file, engine="pyarrow" if HAS_PYARROW else "auto")
+                cols = list(df.columns)
+                for col in cols:
+                    cl = col.lower()
+                    if id_col is None and cl in ("doc_id", "id", "wiki_id", "document_id"):
+                        id_col = col
+                    if title_col is None and cl in ("title", "page_title", "name"):
+                        title_col = col
+                    if body_col is None and cl in ("body", "text", "content", "article_text", "page_text"):
+                        body_col = col
+                    if anchor_col is None and cl in ("anchor_text", "anchors", "links", "wikilinks"):
+                        anchor_col = col
+                if id_col is None or title_col is None or body_col is None:
+                    continue
+                
+                for _, row in df.iterrows():
+                    doc_id = row[id_col]
+                    title = row[title_col]
+                    body = row[body_col]
+                    anchor_text = row[anchor_col] if anchor_col and anchor_col in row else None
+                    
+                    if pd.isna(doc_id) or pd.isna(title) or pd.isna(body):
+                        continue
+                    wiki_id = int(doc_id)
+                    t = str(title)
+                    b = str(body)
+                    if wiki_id == 0 or not t or not b:
+                        continue
+                    
+                    # Parse anchor_text
+                    anchor_list = []
+                    if anchor_text is not None and not pd.isna(anchor_text):
+                        if isinstance(anchor_text, list):
+                            anchor_list = anchor_text
+                        elif isinstance(anchor_text, str):
+                            try:
+                                import json
+                                anchor_list = json.loads(anchor_text)
+                            except Exception:
+                                try:
+                                    anchor_list = eval(anchor_text) if anchor_text.strip() else []
+                                except Exception:
+                                    anchor_list = []
+                        elif isinstance(anchor_text, dict):
+                            anchor_list = [anchor_text]
+                    
+                    yield wiki_id, t, b, anchor_list
+                    
         finally:
             if tmp_file_path and os.path.exists(tmp_file_path):
                 try:
