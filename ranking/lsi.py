@@ -69,6 +69,7 @@ class LSISearcher:
     ) -> List[Tuple[int, float]]:
         """
         Search using LSI by projecting query into latent space and computing cosine similarity.
+        OPTIMIZED VERSION with vectorized operations for much faster performance.
         
         Args:
             query_tokens: List of query terms
@@ -106,27 +107,50 @@ class LSISearcher:
             return []
         query_latent = query_latent / query_latent_norm
         
-        # Compute cosine similarity between query and all documents in latent space
-        scores = {}
-        for doc_idx, doc_vector in enumerate(self.lsi_vectors):
-            if doc_idx not in self.idx_to_doc:
-                continue
-            
-            doc_id = self.idx_to_doc[doc_idx]
-            
-            # Cosine similarity: dot product of normalized vectors
-            doc_norm = np.linalg.norm(doc_vector)
-            if doc_norm == 0:
-                continue
-            
-            doc_vector_norm = doc_vector / doc_norm
-            similarity = float(np.dot(query_latent, doc_vector_norm))
-            scores[doc_id] = similarity
+        # ============================================================
+        # OPTIMIZED: Vectorized cosine similarity computation
+        # ============================================================
         
-        # Sort by score
-        res = list(scores.items())
-        res.sort(key=lambda x: x[1], reverse=True)
-        return res[:top_n]
+        # Normalize all document vectors at once (vectorized)
+        # Shape: (n_docs, n_components) -> (n_docs,)
+        doc_norms = np.linalg.norm(self.lsi_vectors, axis=1, keepdims=True)
+        doc_norms[doc_norms == 0] = 1  # Avoid division by zero
+        lsi_vectors_norm = self.lsi_vectors / doc_norms  # Shape: (n_docs, n_components)
+        
+        # Compute cosine similarity for ALL documents at once (vectorized matrix multiplication)
+        # query_latent: (n_components,)
+        # lsi_vectors_norm: (n_docs, n_components)
+        # similarities: (n_docs,)
+        similarities = lsi_vectors_norm @ query_latent  # Vectorized dot product
+        
+        # Filter to only valid documents (those in idx_to_doc mapping)
+        valid_indices = np.array([idx for idx in range(len(similarities)) if idx in self.idx_to_doc])
+        if len(valid_indices) == 0:
+            return []
+        
+        valid_similarities = similarities[valid_indices]
+        
+        # ============================================================
+        # OPTIMIZED: Use argpartition for top-n (O(n) instead of O(n log n))
+        # ============================================================
+        
+        if len(valid_indices) <= top_n:
+            # If we need all results, just sort
+            sorted_indices = np.argsort(-valid_similarities)
+        else:
+            # Use argpartition for top-n (much faster than full sort)
+            # This finds the top_n largest values without sorting everything
+            top_indices = np.argpartition(-valid_similarities, top_n)[:top_n]
+            # Sort only the top_n results
+            sorted_indices = top_indices[np.argsort(-valid_similarities[top_indices])]
+        
+        # Build results list
+        res = [
+            (int(self.idx_to_doc[valid_indices[i]]), float(valid_similarities[i]))
+            for i in sorted_indices
+        ]
+        
+        return res
 
 
 def build_lsi_index(

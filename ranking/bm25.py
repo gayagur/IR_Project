@@ -32,12 +32,37 @@ class BM25FromIndex:
         self.N = N if N is not None else max(1, len(doc_len))
 
     def _idf(self, df: int) -> float:
-        # common BM25 idf
-        return math.log(1 + (self.N - df + 0.5) / (df + 0.5))
+        # BM25 IDF formula: log((N - df + 0.5) / (df + 0.5) + 1)
+        return math.log((self.N - df + 0.5) / (df + 0.5) + 1)
 
-    def search(self, query_tokens: List[str], *, top_n: int = 100, max_terms: int = 50) -> List[Tuple[int, float]]:
+    def search(
+        self, 
+        query_tokens: List[str], 
+        *, 
+        top_n: int = 100, 
+        max_terms: int = 50,
+        k1: float | None = None,
+        b: float | None = None,
+    ) -> List[Tuple[int, float]]:
+        """
+        Search using BM25 scoring.
+        
+        Args:
+            query_tokens: List of query terms
+            top_n: Number of top results to return
+            max_terms: Maximum number of query terms to use
+            k1: Term frequency saturation parameter (default: uses instance k1)
+            b: Document length normalization parameter (default: uses instance b)
+            
+        Returns:
+            List of (doc_id, score) tuples, sorted by score descending
+        """
         if not query_tokens:
             return []
+
+        # Use provided k1 and b, or fall back to instance defaults
+        k1_val = k1 if k1 is not None else self.k1
+        b_val = b if b is not None else self.b
 
         q = query_tokens[:max_terms]
         q_terms = list(dict.fromkeys(q))  # unique, keeps order
@@ -54,8 +79,9 @@ class BM25FromIndex:
                 dl = self.doc_len.get(doc_id, 0)
                 if dl == 0:
                     continue
-                denom = tf + self.k1 * (1 - self.b + self.b * (dl / self.avgdl))
-                score = idf * (tf * (self.k1 + 1)) / denom
+                # BM25 formula with custom k1 and b
+                denom = tf + k1_val * (1 - b_val + b_val * (dl / self.avgdl))
+                score = idf * (tf * (k1_val + 1)) / denom
                 scores[doc_id] += score
 
         res = list(scores.items())

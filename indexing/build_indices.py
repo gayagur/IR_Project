@@ -6,6 +6,7 @@ import math
 import os
 import pickle
 import re
+import sys
 import tempfile
 import urllib.request
 from collections import Counter, defaultdict
@@ -14,7 +15,7 @@ from typing import DefaultDict, Dict, Iterable, List, Set, Tuple
 
 import config
 from inverted_index_gcp import InvertedIndex
-from parser_utils import get_wikilinks, page_iter, page_iter_parquet, remove_markdown
+from parser_utils import get_wikilinks, page_iter, page_iter_parquet, page_iter_parquet_with_anchors, remove_markdown
 from text_processing import tokenize
 
 NUM_BUCKETS = 124
@@ -173,17 +174,54 @@ def build_anchor_index_batched(dump_path: str, *, is_parquet: bool, pages_per_ba
     batch_i = 0
     in_batch = 0
 
-    it = page_iter_parquet(dump_path) if is_parquet else page_iter(dump_path)
-    for _, __, body in it:
-        in_batch += 1
-        for target_title, anchor_text in get_wikilinks(body):
-            target_title_norm = target_title.replace("_", " ").strip()
-            target_id = title2id.get(target_title) or title2id.get(target_title_norm)
-            if target_id is None:
-                continue
-            toks = _tokenize(anchor_text)
-            if toks:
-                batch_counts[int(target_id)].update(toks)
+    if is_parquet:
+        # Use anchor_text column directly from parquet
+        it = page_iter_parquet_with_anchors(dump_path)
+        for doc_id, title, body, anchor_text_list in it:
+            in_batch += 1
+            
+            # Process anchor_text_list: [{'id': 1234, 'text': 'anchor text'}, ...]
+            if anchor_text_list and isinstance(anchor_text_list, list):
+                for link in anchor_text_list:
+                    if not isinstance(link, dict):
+                        continue
+                    target_id = link.get('id')
+                    anchor_text = link.get('text', '')
+                    if target_id is None:
+                        continue
+                    try:
+                        target_id = int(target_id)
+                    except (ValueError, TypeError):
+                        continue
+                    toks = _tokenize(anchor_text)
+                    if toks:
+                        batch_counts[target_id].update(toks)
+            
+            # Check if we need to flush this batch
+            if in_batch >= pages_per_batch:
+                part_dir = ANCHOR_PARTS_DIR / f"part_{batch_i:05d}"
+                part_dir.mkdir(parents=True, exist_ok=True)
+                part_index = InvertedIndex()
+                for target_id, cnt in batch_counts.items():
+                    part_index.add_doc(int(target_id), cnt)
+                _write_index(part_index, part_dir, "anchor_part")
+                part_dirs.append(part_dir)
+                batch_counts = defaultdict(Counter)
+                in_batch = 0
+                batch_i += 1
+    else:
+        # Keep existing logic for XML dumps using get_wikilinks(body)
+        it = page_iter(dump_path)
+        for _, __, body in it:
+            in_batch += 1
+            for target_title, anchor_text in get_wikilinks(body):
+                target_title_norm = target_title.replace("_", " ").strip()
+                target_id = title2id.get(target_title) or title2id.get(target_title_norm)
+                if target_id is None:
+                    continue
+                toks = _tokenize(anchor_text)
+                if toks:
+                    batch_counts[int(target_id)].update(toks)
 
         if in_batch >= pages_per_batch:
             part_dir = ANCHOR_PARTS_DIR / f"part_{batch_i:05d}"
@@ -422,18 +460,46 @@ def build_pagerank(dump_path: str, *, is_parquet: bool) -> Dict[int, float]:
     graph: Dict[int, Set[int]] = defaultdict(set)
     processed = 0
     
-    it = page_iter_parquet(dump_path) if is_parquet else page_iter(dump_path)
-    for doc_id, _, body in it:
-        processed += 1
-        if processed % 100_000 == 0:
-            print(f"Processed {processed:,} pages...")
-        
-        doc_id_i = int(doc_id)
-        for target_title, _ in get_wikilinks(body):
-            target_title_norm = target_title.replace("_", " ").strip()
-            target_id = title2id.get(target_title) or title2id.get(target_title_norm)
-            if target_id is not None and target_id != doc_id_i:
-                graph[doc_id_i].add(target_id)
+    if is_parquet:
+        # Use anchor_text column directly from parquet
+        it = page_iter_parquet_with_anchors(dump_path)
+        for doc_id, title, body, anchor_text_list in it:
+            processed += 1
+            if processed % 100_000 == 0:
+                print(f"Processed {processed:,} pages...")
+            
+            doc_id_i = int(doc_id)
+            
+            if anchor_text_list is None or not anchor_text_list:
+                continue
+            
+            # Process anchor_text_list: [{'id': 1234, 'text': 'anchor text'}, ...]
+            for link in anchor_text_list:
+                if not isinstance(link, dict):
+                    continue
+                target_id = link.get('id')
+                if target_id is None:
+                    continue
+                try:
+                    target_id = int(target_id)
+                except (ValueError, TypeError):
+                    continue
+                if target_id != doc_id_i:
+                    graph[doc_id_i].add(target_id)
+    else:
+        # Keep existing logic for XML dumps using get_wikilinks(body)
+        it = page_iter(dump_path)
+        for doc_id, _, body in it:
+            processed += 1
+            if processed % 100_000 == 0:
+                print(f"Processed {processed:,} pages...")
+            
+            doc_id_i = int(doc_id)
+            for target_title, _ in get_wikilinks(body):
+                target_title_norm = target_title.replace("_", " ").strip()
+                target_id = title2id.get(target_title) or title2id.get(target_title_norm)
+                if target_id is not None and target_id != doc_id_i:
+                    graph[doc_id_i].add(target_id)
     
     print(f"✓ Built graph with {len(graph):,} nodes and {sum(len(neighbors) for neighbors in graph.values()):,} edges")
     
@@ -512,7 +578,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dump", required=True, help="XML .bz2, parquet file/dir, or gs://... parquet path")
-    parser.add_argument("--build", choices=["body", "title", "anchor", "pageviews", "pagerank", "all"], default="all")
+    parser.add_argument("--build", choices=["body", "title", "anchor", "pageviews", "pagerank", "lsi", "all"], default="all")
     parser.add_argument("--parquet", action="store_true", help="Force parquet mode")
     args = parser.parse_args()
 
@@ -529,6 +595,52 @@ if __name__ == "__main__":
         build_pageviews(args.dump)
     if args.build == "pagerank":
         build_pagerank(args.dump, is_parquet=is_parquet)
+    if args.build == "lsi":
+        # LSI requires body index and doc_norms to be built first
+        print("\n" + "=" * 60)
+        print("Building LSI index...")
+        print("=" * 60)
+        from ranking.lsi import build_lsi_index
+        
+        # Load body index and doc_norms
+        bucket_name = config.BUCKET_NAME if config.WRITE_TO_GCS else None
+        body_index = InvertedIndex.read_index(str(config.BODY_INDEX_DIR), "body", bucket_name=bucket_name)
+        
+        # Load doc_norms
+        doc_norms_path = _as_path(config.DOC_NORMS_PATH)
+        if bucket_name:
+            from google.cloud import storage
+            from inverted_index_gcp import get_bucket
+            gcs_bucket = get_bucket(bucket_name)
+            blob = gcs_bucket.blob(str(doc_norms_path))
+            if not blob.exists():
+                print("Error: doc_norms.pkl not found. Please build body index first.")
+                sys.exit(1)
+            import tempfile
+            temp_path = Path(tempfile.mktemp(suffix='.pkl'))
+            blob.download_to_filename(str(temp_path))
+            with open(temp_path, 'rb') as f:
+                doc_norms = pickle.load(f)
+            temp_path.unlink()
+        else:
+            if not doc_norms_path.exists():
+                print("Error: doc_norms.pkl not found. Please build body index first.")
+                sys.exit(1)
+            with open(doc_norms_path, 'rb') as f:
+                doc_norms = pickle.load(f)
+        
+        # Build LSI index
+        output_dir = _as_path(config.LSI_DIR)
+        build_lsi_index(
+            body_index=body_index,
+            body_index_dir=str(config.BODY_INDEX_DIR),
+            doc_norms=doc_norms,
+            output_dir=output_dir,
+            n_components=config.LSI_N_COMPONENTS,
+            max_terms=config.LSI_MAX_TERMS,
+            max_docs=config.LSI_MAX_DOCS,
+        )
+        print("✓ LSI index built successfully")
     if args.build == "all":
         # Build pageviews and pagerank as part of "all"
         print("\n" + "=" * 60)

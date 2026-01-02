@@ -55,28 +55,45 @@ def search():
         # Run searches in parallel for faster performance
         print("[SEARCH] Searching all indices in parallel...")
         from concurrent.futures import ThreadPoolExecutor
+        import config
         
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        # Determine number of workers based on whether LSI is available
+        max_workers = 4 if engine.body_lsi and getattr(config, 'LSI_WEIGHT', 0.25) > 0 else 3
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all search tasks
             future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
             future_title = executor.submit(engine.search_title_count, q_tokens, top_n=5000)
             future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=5000)
             
+            # Submit LSI search if available
+            lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
+            future_lsi = None
+            if engine.body_lsi and lsi_weight > 0:
+                future_lsi = executor.submit(engine.search_body_lsi, q_tokens, top_n=200)
+            
             # Wait for all to complete
             body_ranked = future_body.result()
             title_ranked = future_title.result()
             anchor_ranked = future_anchor.result()
+            lsi_ranked = future_lsi.result() if future_lsi else None
         
         print(f"[SEARCH] Body results: {len(body_ranked)}")
         print(f"[SEARCH] Title results: {len(title_ranked)}")
         print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
+        if lsi_ranked:
+            print(f"[SEARCH] LSI results: {len(lsi_ranked)}")
 
         print("[SEARCH] Merging signals...")
+        # NOTE: merge_signals uses config.py weights by default (backward-compatible)
+        # Custom weights are only used when explicitly passed via /search_with_weights endpoint
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
+            lsi_ranked=lsi_ranked,
             top_n=100,
+            # Not passing custom weights - uses config.py values (default behavior)
         )
         print(f"[SEARCH] Merged results: {len(merged)}")
 
@@ -230,6 +247,129 @@ def search_anchor():
     # END SOLUTION
     return jsonify(res)
 
+@app.route("/search_lsi")
+def search_lsi():
+    ''' Returns up to a 100 search results for the query using LSI (Latent Semantic Indexing).
+    
+        To issue a query navigate to a URL like:
+         http://YOUR_SERVER_DOMAIN/search_lsi?query=hello+world
+        where YOUR_SERVER_DOMAIN is something like XXXX-XX-XX-XX-XX.ngrok.io
+        if you're using ngrok on Colab or your external IP on GCP.
+    Returns:
+    --------
+        list of up to 100 search results, ordered from best to worst where each 
+        element is a tuple (wiki_id, title).
+    '''
+    res = []
+    query = request.args.get('query', '')
+    if len(query) == 0:
+      return jsonify(res)
+    # BEGIN SOLUTION
+    try:
+        print(f"[SEARCH_LSI] Query: '{query}'")
+        from search_runtime import get_engine
+        engine = get_engine()
+        
+        if engine.body_lsi is None:
+            print("[SEARCH_LSI] LSI not available, returning empty results")
+            return jsonify(res)
+        
+        q_tokens = engine.tokenize_query(query)
+        print(f"[SEARCH_LSI] Tokenized query: {q_tokens}")
+        if not q_tokens:
+            print("[SEARCH_LSI] No tokens, returning empty results")
+            return jsonify(res)
+        
+        ranked = engine.search_body_lsi(q_tokens, top_n=100)
+        print(f"[SEARCH_LSI] Results: {len(ranked)}")
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search_lsi: {str(e)}\n{traceback.format_exc()}"
+        print(f"[SEARCH_LSI ERROR] {error_msg}")
+        return jsonify(res)  # Return empty list instead of error
+    # END SOLUTION
+    return jsonify(res)
+
+@app.route("/search_with_weights")
+def search_with_weights():
+    ''' Returns search results with custom weights.
+    
+        Query parameters:
+        - query: search query (required)
+        - body_weight: weight for BM25 body search (default: from config)
+        - title_weight: weight for title search (default: from config)
+        - anchor_weight: weight for anchor search (default: from config)
+        - lsi_weight: weight for LSI search (default: from config, 0.0 to disable)
+        - pagerank_boost: PageRank boost weight (default: from config)
+        - pageview_boost: PageView boost weight (default: from config)
+        
+        Example:
+        http://YOUR_SERVER/search_with_weights?query=hello&body_weight=1.0&title_weight=0.5&lsi_weight=0.0
+    '''
+    res = []
+    query = request.args.get('query', '')
+    if len(query) == 0:
+        return jsonify(res)
+    
+    try:
+        from search_runtime import get_engine
+        import config
+        
+        engine = get_engine()
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
+        
+        # Get custom weights from query parameters, fallback to config
+        body_weight = float(request.args.get('body_weight', getattr(config, 'BODY_WEIGHT', 1.0)))
+        title_weight = float(request.args.get('title_weight', getattr(config, 'TITLE_WEIGHT', 0.35)))
+        anchor_weight = float(request.args.get('anchor_weight', getattr(config, 'ANCHOR_WEIGHT', 0.25)))
+        lsi_weight = float(request.args.get('lsi_weight', getattr(config, 'LSI_WEIGHT', 0.25)))
+        pr_boost = float(request.args.get('pagerank_boost', getattr(config, 'PAGERANK_BOOST', 0.15)))
+        pv_boost = float(request.args.get('pageview_boost', getattr(config, 'PAGEVIEW_BOOST', 0.10)))
+        
+        # Run searches in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        max_workers = 4 if engine.body_lsi and lsi_weight > 0 else 3
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
+            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=5000)
+            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=5000)
+            future_lsi = None
+            if engine.body_lsi and lsi_weight > 0:
+                future_lsi = executor.submit(engine.search_body_lsi, q_tokens, top_n=200)
+            
+            body_ranked = future_body.result()
+            title_ranked = future_title.result()
+            anchor_ranked = future_anchor.result()
+            lsi_ranked = future_lsi.result() if future_lsi else None
+        
+        # Merge with custom weights
+        merged = engine.merge_signals(
+            body_ranked=body_ranked,
+            title_ranked=title_ranked,
+            anchor_ranked=anchor_ranked,
+            lsi_ranked=lsi_ranked,
+            top_n=100,
+            body_weight=body_weight,
+            title_weight=title_weight,
+            anchor_weight=anchor_weight,
+            lsi_weight=lsi_weight,
+            pagerank_boost=pr_boost,
+            pageview_boost=pv_boost,
+        )
+        
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
+    except Exception as e:
+        import traceback
+        error_msg = f"Error in search_with_weights: {str(e)}\n{traceback.format_exc()}"
+        print(f"[SEARCH_WITH_WEIGHTS ERROR] {error_msg}")
+        return jsonify(res)
+    
+    return jsonify(res)
+
 @app.route("/get_pagerank", methods=['POST'])
 def get_pagerank():
     ''' Returns PageRank values for a list of provided wiki article IDs. 
@@ -263,6 +403,32 @@ def get_pagerank():
         print(f"[GET_PAGERANK ERROR] {e}\n{traceback.format_exc()}")
         res = [0.0] * len(wiki_ids) if wiki_ids else []
     # END SOLUTION
+    return jsonify(res)
+
+@app.route("/search_body_bm25")
+def search_body_bm25():
+    """Search body with custom BM25 parameters."""
+    res = []
+    query = request.args.get('query', '')
+    if not query:
+        return jsonify(res)
+    
+    try:
+        from search_runtime import get_engine
+        engine = get_engine()
+        
+        k1 = float(request.args.get('k1', 1.5))
+        b = float(request.args.get('b', 0.75))
+        
+        q_tokens = engine.tokenize_query(query)
+        if not q_tokens:
+            return jsonify(res)
+        
+        ranked = engine.search_body_bm25(q_tokens, top_n=100, k1=k1, b=b)
+        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
+    except Exception as e:
+        print(f"[BM25 ERROR] {e}")
+    
     return jsonify(res)
 
 @app.route("/get_pageview", methods=['POST'])
@@ -313,9 +479,17 @@ if __name__ == '__main__':
     print("=" * 60)
     print("Checking if indices need to be downloaded from GCS...")
     print("=" * 60)
+    
+    # Add detailed logging
     try:
+        print("[DEBUG] Importing modules...")
         from search_runtime import _check_if_indices_exist_locally, _download_indices_from_gcs_to_local
         import config
+        
+        print(f"[DEBUG] READ_FROM_GCS = {getattr(config, 'READ_FROM_GCS', False)}")
+        print(f"[DEBUG] BUCKET_NAME = {getattr(config, 'BUCKET_NAME', 'NOT SET')}")
+        print(f"[DEBUG] INDICES_DIR = {config.INDICES_DIR}")
+        print(f"[DEBUG] AUX_DIR = {config.AUX_DIR}")
         
         read_from_gcs = getattr(config, 'READ_FROM_GCS', False)
         
@@ -324,28 +498,62 @@ if __name__ == '__main__':
             print("Skipping download step...")
         else:
             # READ_FROM_GCS = False - try to download to local disk for faster access
-            if not _check_if_indices_exist_locally():
+            print("[DEBUG] READ_FROM_GCS = False - checking if indices exist locally...")
+            print("[DEBUG] Calling _check_if_indices_exist_locally()...")
+            
+            try:
+                indices_exist = _check_if_indices_exist_locally()
+                print(f"[DEBUG] _check_if_indices_exist_locally() returned: {indices_exist}")
+            except Exception as check_error:
+                print(f"[DEBUG] ERROR in _check_if_indices_exist_locally(): {check_error}")
+                import traceback
+                traceback.print_exc()
+                indices_exist = False  # Assume they don't exist if check fails
+            
+            if not indices_exist:
+                print("=" * 60)
                 print("Indices not found locally - downloading from GCS bucket...")
+                print("=" * 60)
+                
                 if not config.BUCKET_NAME:
-                    print("⚠ Warning: BUCKET_NAME is not set in config.py")
+                    print("⚠ ERROR: BUCKET_NAME is not set in config.py")
                     print("Cannot download indices from GCS")
                 else:
+                    print(f"[DEBUG] Starting download from bucket: {config.BUCKET_NAME}")
+                    print("[DEBUG] Calling _download_indices_from_gcs_to_local()...")
+                    
                     t0_download = time.time()
-                    if _download_indices_from_gcs_to_local(config.BUCKET_NAME):
+                    try:
+                        success = _download_indices_from_gcs_to_local(config.BUCKET_NAME)
                         download_time = time.time() - t0_download
+                        
+                        if success:
+                            print("=" * 60)
+                            print(f"✓ All indices downloaded in {download_time:.1f} seconds")
+                            print("=" * 60)
+                        else:
+                            print("=" * 60)
+                            print("⚠ ERROR: _download_indices_from_gcs_to_local() returned False")
+                            print("Server will attempt to read directly from GCS as fallback")
+                            print("=" * 60)
+                    except Exception as download_error:
                         print("=" * 60)
-                        print(f"✓ All indices downloaded in {download_time:.1f} seconds")
+                        print(f"⚠ ERROR during download: {download_error}")
+                        import traceback
+                        traceback.print_exc()
                         print("=" * 60)
-                    else:
-                        print("⚠ Warning: Failed to download indices from GCS")
-                        print("Server will attempt to read directly from GCS as fallback")
             else:
+                print("=" * 60)
                 print("✓ Indices already exist locally - no download needed")
+                print("=" * 60)
+                
     except Exception as e:
         import traceback
-        print(f"⚠ Error checking/downloading indices: {e}")
+        print("=" * 60)
+        print(f"⚠ ERROR in download check: {e}")
         print(traceback.format_exc())
         print("Will continue with server startup...")
+        print("=" * 60)
     
     # Step 2: Pre-load search engine (AFTER indices are downloaded)
     print("=" * 60)

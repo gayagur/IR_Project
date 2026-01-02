@@ -175,16 +175,16 @@ def main():
     # Import config to get default base URL
     try:
         import config
-        default_base_url = getattr(config, 'BASE_URL', 'http://localhost:8080')
+        default_base_url = getattr(config, 'BASE_URL', 'http://104.198.58.119:8080')
     except ImportError:
-        default_base_url = 'http://localhost:8080'
+        default_base_url = 'http://104.198.58.119:8080'
     
     parser.add_argument("--base-url", default=default_base_url, help=f"Base URL of search engine (default: {default_base_url})")
     parser.add_argument("--queries", default="test_queries.json", help="Path to queries JSON file (test_queries.json or queries_train.json)")
     parser.add_argument("--output", default="evaluation_results.json", help="Output file for results")
     parser.add_argument("--endpoints", nargs="+", 
                        default=["search", "search_body", "search_title", "search_anchor"],
-                       help="Endpoints to evaluate (available: search, search_body, search_title, search_anchor)")
+                       help="Endpoints to evaluate (available: search, search_body, search_title, search_anchor, search_lsi)")
     args = parser.parse_args()
     
     # Load queries

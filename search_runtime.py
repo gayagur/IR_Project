@@ -5,7 +5,7 @@ import math
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import config
 from inverted_index_gcp import InvertedIndex
@@ -14,6 +14,9 @@ from text_processing import tokenize
 from ranking.bm25 import BM25FromIndex
 from ranking.tfidf_cosine import search_tfidf_cosine
 from ranking.merge import merge_rankings
+
+if TYPE_CHECKING:
+    from ranking.lsi import LSISearcher
 
 
 def _load_pickle(path: str | Path, default, bucket_name=None):
@@ -101,19 +104,39 @@ class SearchEngine:
     pagerank: Dict[int, float]
     pageviews: Dict[int, int]
     body_bm25: Optional[BM25FromIndex]
-    body_index_dir: str
-    title_index_dir: str
-    anchor_index_dir: str
+    body_index_dir: str = ""
+    title_index_dir: str = ""
+    anchor_index_dir: str = ""
     bucket_name: Optional[str] = None
+    body_lsi: Optional['LSISearcher'] = None  # Forward reference
 
     def tokenize_query(self, query: str) -> List[str]:
         return tokenize(query)
 
-    def search_body_bm25(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
+    def search_body_bm25(
+        self, 
+        q_tokens: List[str], 
+        *, 
+        top_n: int = 100,
+        k1: float = 1.5,
+        b: float = 0.75,
+    ) -> List[Tuple[int, float]]:
+        """
+        Search using BM25 scoring with customizable parameters.
+        
+        Args:
+            q_tokens: List of query tokens
+            top_n: Number of top results to return
+            k1: Term frequency saturation parameter (default: 1.5)
+            b: Document length normalization parameter (default: 0.75)
+            
+        Returns:
+            List of (doc_id, score) tuples, sorted by score descending
+        """
         if self.body_bm25 is None:
             print("[WARNING] body_bm25 is None, returning empty results")
             return []
-        return self.body_bm25.search(q_tokens, top_n=top_n)
+        return self.body_bm25.search(q_tokens, top_n=top_n, k1=k1, b=b)
 
     def search_body_tfidf_cosine(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
         return search_tfidf_cosine(
@@ -124,6 +147,12 @@ class SearchEngine:
             top_n=top_n,
             bucket_name=self.bucket_name,
         )
+    
+    def search_body_lsi(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
+        """Search using LSI (Latent Semantic Indexing)."""
+        if self.body_lsi is None:
+            return []
+        return self.body_lsi.search(q_tokens, top_n=top_n)
 
     def _count_index_matches(
         self,
@@ -193,17 +222,45 @@ class SearchEngine:
         body_ranked: List[Tuple[int, float]],
         title_ranked: List[Tuple[int, float]],
         anchor_ranked: List[Tuple[int, float]],
+        lsi_ranked: Optional[List[Tuple[int, float]]] = None,
         top_n: int = 100,
+        # Optional custom weights (if None, uses config values)
+        # NOTE: These parameters are optional and backward-compatible.
+        # If not provided, the function uses weights from config.py (default behavior).
+        body_weight: Optional[float] = None,
+        title_weight: Optional[float] = None,
+        anchor_weight: Optional[float] = None,
+        lsi_weight: Optional[float] = None,
+        pagerank_boost: Optional[float] = None,
+        pageview_boost: Optional[float] = None,
     ) -> List[Tuple[int, float]]:
-        """Weighted merge + light PageRank/PageViews boosting over the merged candidate set."""
-        merged = merge_rankings(
-            [
-                (body_ranked, 1.0),
-                (title_ranked, 0.35),
-                (anchor_ranked, 0.25),
-            ],
-            top_n=max(500, top_n),
-        )
+        """Weighted merge + light PageRank/PageViews boosting over the merged candidate set.
+        
+        Uses weights from config.py by default, or custom weights if provided.
+        
+        This function is backward-compatible: if custom weights are not provided (None),
+        it automatically uses the weights from config.py, maintaining the original behavior.
+        """
+        # Use custom weights if provided, otherwise from config
+        body_w = body_weight if body_weight is not None else getattr(config, 'BODY_WEIGHT', 1.0)
+        title_w = title_weight if title_weight is not None else getattr(config, 'TITLE_WEIGHT', 0.35)
+        anchor_w = anchor_weight if anchor_weight is not None else getattr(config, 'ANCHOR_WEIGHT', 0.25)
+        lsi_w = lsi_weight if lsi_weight is not None else getattr(config, 'LSI_WEIGHT', 0.25)
+        pr_boost = pagerank_boost if pagerank_boost is not None else getattr(config, 'PAGERANK_BOOST', 0.15)
+        pv_boost = pageview_boost if pageview_boost is not None else getattr(config, 'PAGEVIEW_BOOST', 0.10)
+        
+        # Build ranking list with weights
+        ranking_list = [
+            (body_ranked, body_w),
+            (title_ranked, title_w),
+            (anchor_ranked, anchor_w),
+        ]
+        
+        # Add LSI if available and weight > 0
+        if lsi_ranked and lsi_w > 0:
+            ranking_list.append((lsi_ranked, lsi_w))
+        
+        merged = merge_rankings(ranking_list, top_n=max(500, top_n))
 
         # Add PR/PV boosts for the current candidate set only (avoid normalizing over all docs).
         cand_ids = [doc_id for doc_id, _ in merged]
@@ -227,11 +284,12 @@ class SearchEngine:
         pr_max = max(pr_vals) if pr_vals else 0.0
         pv_max = max(pv_vals) if pv_vals else 0.0
 
+        # Use boost weights (already set above from parameters or config)
         rescored: List[Tuple[int, float]] = []
         for (doc_id, base), pr, pv in zip(merged, pr_vals, pv_vals):
             pr_norm = (pr / pr_max) if pr_max > 0 else 0.0
             pv_norm = (pv / pv_max) if pv_max > 0 else 0.0
-            score = base + 0.15 * pr_norm + 0.10 * pv_norm
+            score = base + pr_boost * pr_norm + pv_boost * pv_norm
             rescored.append((doc_id, score))
 
         rescored.sort(key=lambda x: (-x[1], x[0]))
@@ -527,6 +585,96 @@ def get_engine() -> SearchEngine:
         traceback.print_exc()
         body_bm25 = None
 
+    print("Checking for LSI index...")
+    body_lsi = None
+    lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
+    if lsi_weight > 0:
+        try:
+            from ranking.lsi import LSISearcher
+            from pathlib import Path
+            
+            # Get LSI paths
+            if bucket_name:
+                # Reading from GCS - paths are strings
+                lsi_vectors_path = config.LSI_VECTORS_PATH
+                svd_components_path = config.LSI_SVD_COMPONENTS_PATH
+                term_to_idx_path = config.TERM_TO_IDX_PATH
+                doc_to_idx_path = config.DOC_TO_IDX_PATH
+            else:
+                # Reading from local filesystem - paths are Path objects
+                lsi_vectors_path = Path(config.LSI_VECTORS_PATH)
+                svd_components_path = Path(config.LSI_SVD_COMPONENTS_PATH)
+                term_to_idx_path = Path(config.TERM_TO_IDX_PATH)
+                doc_to_idx_path = Path(config.DOC_TO_IDX_PATH)
+            
+            # Check if all LSI files exist
+            if bucket_name:
+                # Check in GCS
+                from google.cloud import storage
+                from inverted_index_gcp import get_bucket
+                gcs_bucket = get_bucket(bucket_name)
+                
+                all_exist = (
+                    gcs_bucket.blob(lsi_vectors_path).exists() and
+                    gcs_bucket.blob(svd_components_path).exists() and
+                    gcs_bucket.blob(term_to_idx_path).exists() and
+                    gcs_bucket.blob(doc_to_idx_path).exists()
+                )
+            else:
+                # Check locally
+                all_exist = all(
+                    p.exists() for p in [lsi_vectors_path, svd_components_path, term_to_idx_path, doc_to_idx_path]
+                )
+            
+            if all_exist:
+                if bucket_name:
+                    # Download LSI files temporarily for loading
+                    import tempfile
+                    import os
+                    temp_dir = Path(tempfile.mkdtemp())
+                    try:
+                        for gcs_path, local_name in [
+                            (lsi_vectors_path, "lsi_vectors.pkl"),
+                            (svd_components_path, "svd_components.pkl"),
+                            (term_to_idx_path, "term_to_idx.pkl"),
+                            (doc_to_idx_path, "doc_to_idx.pkl"),
+                        ]:
+                            blob = gcs_bucket.blob(gcs_path)
+                            local_path = temp_dir / local_name
+                            blob.download_to_filename(str(local_path))
+                        
+                        body_lsi = LSISearcher(
+                            lsi_vectors_path=temp_dir / "lsi_vectors.pkl",
+                            svd_components_path=temp_dir / "svd_components.pkl",
+                            term_to_idx_path=temp_dir / "term_to_idx.pkl",
+                            doc_to_idx_path=temp_dir / "doc_to_idx.pkl",
+                            n_components=config.LSI_N_COMPONENTS,
+                        )
+                        print("  ✓ LSI initialized (loaded from GCS)")
+                    finally:
+                        # Clean up temp files
+                        import shutil
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                else:
+                    body_lsi = LSISearcher(
+                        lsi_vectors_path=lsi_vectors_path,
+                        svd_components_path=svd_components_path,
+                        term_to_idx_path=term_to_idx_path,
+                        doc_to_idx_path=doc_to_idx_path,
+                        n_components=config.LSI_N_COMPONENTS,
+                    )
+                    print("  ✓ LSI initialized")
+            else:
+                print("  ⚠ LSI files not found, skipping LSI")
+        except ImportError:
+            print("  ⚠ LSI module not available (numpy/scikit-learn not installed?)")
+        except Exception as e:
+            print(f"  ⚠ Failed to initialize LSI: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("  ⚠ LSI weight is 0, skipping LSI initialization")
+
     print("Creating SearchEngine object...")
     try:
         _ENGINE = SearchEngine(
@@ -540,6 +688,7 @@ def get_engine() -> SearchEngine:
             pagerank=pagerank,
             pageviews=pageviews,
             body_bm25=body_bm25,
+            body_lsi=body_lsi,
             body_index_dir=body_dir,
             title_index_dir=title_dir,
             anchor_index_dir=anchor_dir,
