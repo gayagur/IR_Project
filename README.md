@@ -32,7 +32,7 @@
 
 <img src="https://img.shields.io/badge/📚%20Information%20Retrieval-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
 &nbsp;
-<img src="https://img.shields.io/badge/🎓%202024%2F2025-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
+<img src="https://img.shields.io/badge/🎓%202025%2F2026-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
 
 </div>
 
