@@ -651,8 +651,6 @@ def get_engine() -> SearchEngine:
     lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
     if lsi_weight > 0:
         print("Checking for LSI index...")
-    else:
-        print("LSI weight is 0, skipping LSI initialization entirely")
         try:
             from ranking.lsi import LSISearcher
             from pathlib import Path
@@ -736,6 +734,8 @@ def get_engine() -> SearchEngine:
             print(f"  ⚠ Failed to initialize LSI: {e}")
             import traceback
             traceback.print_exc()
+    else:
+        print("LSI weight is 0, skipping LSI initialization entirely")
 
     print("Creating SearchEngine object...")
     try:

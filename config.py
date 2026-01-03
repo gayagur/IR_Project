@@ -95,10 +95,10 @@ BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no norma
 # ============================================================================
 # Weights for merging different search signals in /search endpoint
 # These can be tuned to optimize performance
-BODY_WEIGHT = 1.0      # BM25 body search weight
-TITLE_WEIGHT = 0.35    # Title match weight
-ANCHOR_WEIGHT = 0.25   # Anchor text weight
-LSI_WEIGHT = 0.25      # LSI weight (set to 0.0 to disable LSI)
+BODY_WEIGHT = 0.4      # BM25 body search weight
+TITLE_WEIGHT = 0.75    # Title match weight
+ANCHOR_WEIGHT = 1.0   # Anchor text weight
+LSI_WEIGHT = 0.0      # LSI weight (set to 0.0 to disable LSI)
 
 # PageRank and PageView boost weights (applied after merging)
 PAGERANK_BOOST = 0.15  # PageRank boost weight

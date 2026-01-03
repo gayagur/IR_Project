@@ -64,9 +64,9 @@ def search():
         # Run body/title/anchor searches in parallel (no LSI search)
         max_workers = 3
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=150)
-            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=200)
-            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=200)
+            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
+            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=6000)
+            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=6000)
             
             # Wait for all to complete
             body_ranked = future_body.result()
@@ -84,7 +84,7 @@ def search():
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
             lsi_ranked=None,  # No LSI in initial merge
-            top_n=150,  # Get more candidates for reranking
+            top_n=500,  # Get more candidates for reranking
         )
         print(f"[SEARCH] Merged results (before LSI rerank): {len(merged)}")
         
@@ -340,9 +340,9 @@ def search_with_weights():
         max_workers = 3
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=150)
-            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=200)
-            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=200)
+            future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
+            future_title = executor.submit(engine.search_title_count, q_tokens, top_n=6000)
+            future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=6000)
             
             body_ranked = future_body.result()
             title_ranked = future_title.result()
@@ -354,7 +354,7 @@ def search_with_weights():
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
             lsi_ranked=None,  # No LSI in initial merge
-            top_n=150,  # Get more candidates for reranking
+            top_n=500,  # Get more candidates for reranking
             body_weight=body_weight,
             title_weight=title_weight,
             anchor_weight=anchor_weight,
