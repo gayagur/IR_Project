@@ -222,10 +222,10 @@ if LSI_WEIGHT > 0:
 **Default Weights:**
 | Signal | Weight | Method |
 |--------|--------|--------|
-| Body | 1.0 | BM25 |
-| Title | 0.35 | Binary |
-| Anchor | 0.25 | Binary |
-| LSI | 0.25 | Reranking (top-K) |
+| Body | 0.4 | BM25 |
+| Title | 0.75 | Binary |
+| Anchor | 1.0 | Binary |
+| LSI | 0.0 | Reranking (top-K) |
 | PageRank | 0.15 | Log boost |
 | PageView | 0.10 | Log boost |
 
