@@ -33,14 +33,14 @@ BASE_URL = "http://104.198.58.119:8080"
 # ============================================================
 WEIGHTS = {
     'body': 0.3,
-    'title': 1.0,
+    'title': 0.75,
     'anchor': 1.0,
     'lsi': 0.0,
-    'pagerank': 0.2,
-    'pageview': 0.10,
+    'pagerank': 0.15,
+    'pageview': 0.1,
 }
 
-NUM_QUERIES = 30  # How many queries to test
+NUM_QUERIES = 32  # How many queries to test
 # ============================================================
 
 
@@ -233,7 +233,7 @@ def query_with_weights(query: str, weights: Dict[str, float]) -> Tuple[List[int]
 def main():
     # Load queries - use config for path resolution
     import config
-    queries_path = config.QUERIES_DIR / "test_queries.json"
+    queries_path = config.QUERIES_DIR / "queries_train.json"
     
     if not queries_path.exists():
         print(f"Error: {queries_path} not found!")
