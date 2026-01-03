@@ -14,7 +14,6 @@
 
 ### ✨ Project Creators ✨
 
-
   <tr>
     <td align="center">
       <img src="https://img.shields.io/badge/%20%20👑%20%20Gaya%20Gur%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Gaya Gur"/>
@@ -26,6 +25,10 @@
 
 
 <br/>
+<p align="center">
+  <img src="assets/team.png" width="260" />
+</p>
+
 
 <img src="https://img.shields.io/badge/📚%20Information%20Retrieval-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
 &nbsp;
