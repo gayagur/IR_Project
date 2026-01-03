@@ -38,3 +38,12 @@ aux/*.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Experiment results (images and graphs)
+experiments/*_tuning_results/
+experiments/*_results/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg

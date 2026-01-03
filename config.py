@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 INDICES_DIR = BASE_DIR / "indices"
 AUX_DIR = BASE_DIR / "aux"
+QUERIES_DIR = BASE_DIR  # Queries files are in the root directory
 
 # ============================================================================
 # GCP configuration (only needed if you read source data from GCS or store outputs on GCS)
@@ -80,6 +81,7 @@ DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR /
 LSI_N_COMPONENTS = 100
 LSI_MAX_TERMS = 50000
 LSI_MAX_DOCS = None  # None = all documents
+LSI_TOP_K = 100  # Number of top results to rerank with LSI
 
 # ============================================================================
 # BM25 parameters
@@ -93,10 +95,10 @@ BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no norma
 # ============================================================================
 # Weights for merging different search signals in /search endpoint
 # These can be tuned to optimize performance
-BODY_WEIGHT = 1.0      # BM25 body search weight
-TITLE_WEIGHT = 0.35    # Title match weight
-ANCHOR_WEIGHT = 0.25   # Anchor text weight
-LSI_WEIGHT = 0.25      # LSI weight (set to 0.0 to disable LSI)
+BODY_WEIGHT = 0.4      # BM25 body search weight
+TITLE_WEIGHT = 0.75    # Title match weight
+ANCHOR_WEIGHT = 1.0   # Anchor text weight
+LSI_WEIGHT = 0.0      # LSI weight (set to 0.0 to disable LSI)
 
 # PageRank and PageView boost weights (applied after merging)
 PAGERANK_BOOST = 0.15  # PageRank boost weight
