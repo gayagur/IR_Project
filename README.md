@@ -420,8 +420,8 @@ TITLE_INDEX_DIR = "indices/title"
 ANCHOR_INDEX_DIR = "indices/anchor"
 
 # BM25 parameters
-BM25_K1 = 2.5
-BM25_B = 0.0
+BM25_K1 = 3.0
+BM25_B = 0.25
 
 # LSI configuration
 LSI_TOP_K = 100          # Number of results to rerank
