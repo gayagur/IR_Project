@@ -178,8 +178,8 @@ score(D, Q) = Σ IDF(qi) · (tf(qi, D) · (k1 + 1)) / (tf(qi, D) + k1 · (1 - b 
 **Parameters:**
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `k1` | Term frequency saturation | 2.5 |
-| `b` | Document length normalization | 0.0 |
+| `k1` | Term frequency saturation | 3.0 |
+| `b` | Document length normalization | 0.25 |
 
 ### LSI (Latent Semantic Indexing)
 LSI reranking on top-K results for semantic similarity:
@@ -359,10 +359,10 @@ LSI_WEIGHT = 0.25        # LSI weight (0.0 to disable)
 LSI_N_COMPONENTS = 100   # Latent dimensions
 
 # Ranking weights
-BODY_WEIGHT = 1.0
-TITLE_WEIGHT = 0.35
-ANCHOR_WEIGHT = 0.25
-LSI_WEIGHT = 0.25
+BODY_WEIGHT = 0.4
+TITLE_WEIGHT = 0.75
+ANCHOR_WEIGHT = 1.0
+LSI_WEIGHT = 0.0
 PAGERANK_BOOST = 0.15
 PAGEVIEW_BOOST = 0.10
 
@@ -377,10 +377,9 @@ RESULTS_LIMIT = 100
 
 | Metric | Value |
 |--------|-------|
-| Average Query Latency | ~0.5s |
+| Average Query Latency | ~2.0s |
 | Index Load Time | ~2 min |
 | Memory Usage | ~8 GB |
-| Throughput | ~10 queries/sec |
 | LSI Reranking Time | ~50ms (on top-100) |
 
 ---
