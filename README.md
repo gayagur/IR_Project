@@ -355,7 +355,7 @@ BM25_B = 0.0
 
 # LSI configuration
 LSI_TOP_K = 100          # Number of results to rerank
-LSI_WEIGHT = 0.25        # LSI weight (0.0 to disable)
+LSI_WEIGHT = 0.0        # LSI weight (0.0 to disable)- we decided to not use LSI but you can change it
 LSI_N_COMPONENTS = 100   # Latent dimensions
 
 # Ranking weights
