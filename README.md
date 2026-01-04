@@ -35,7 +35,6 @@
 <img src="https://img.shields.io/badge/🎓%202025%2F2026-FF8C00?style=flat&labelColor=FF8C00" height="22"/>
 
 </div>
-
 ---
 
 
@@ -53,48 +52,11 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 ---
 
 ## 🏗️ Architecture
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         User Query                               │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Flask API (search_frontend.py)                │
-│                                                                  │
-│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor + LSI)│
-│  /search_body ─► TF-IDF Cosine on article text                   │
-│  /search_title ► Title matching                                  │
-│  /search_anchor► Anchor text search                              │
-│  /search_lsi ──► LSI-only search                                 │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Ranking Engine                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │  Body    │ │  Title   │ │  Anchor  │ │   LSI    │            │
-│  │  BM25    │ │  Binary  │ │  Binary  │ │ Rerank   │            │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘            │
-│  ┌──────────┐ ┌──────────┐                                       │
-│  │ PageRank │ │ PageView │                                       │
-│  │  Boost   │ │  Boost   │                                       │
-│  └──────────┘ └──────────┘                                       │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    GCP Storage (Indices)                         │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐  │
-│  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
-│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, Norms│  │
-│  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │ LSI Index (optional) - lsi_vectors, svd_components        │  │
-│  └────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
 
+<br/>
+<p align="center">
+  <img src="assets/build.png" width="700" />
+</p>
 ---
 
 ## 📁 Project Structure
