@@ -166,6 +166,72 @@ Multi-signal fusion combining all ranking signals with LSI reranking.
 GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=0.35&anchor_weight=0.25&lsi_weight=0.25&pagerank_boost=0.15
 ```
 
+### PageRank & PageView Endpoints
+
+#### Get PageRank Scores
+Returns PageRank values for a list of Wikipedia article IDs.
+
+**Endpoint:** `POST /get_pagerank`
+
+**Request:**
+```bash
+curl -X POST "http://<SERVER_IP>:8080/get_pagerank" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
+```
+
+**Response:**
+```json
+[0.000123, 0.000456, 0.000789]
+```
+
+**Python Example:**
+```python
+import requests
+
+# Get PageRank for specific documents
+doc_ids = [12345, 67890, 11111]
+response = requests.post(
+    "http://<SERVER_IP>:8080/get_pagerank",
+    json=doc_ids
+)
+pagerank_scores = response.json()
+# Returns: [0.000123, 0.000456, 0.000789]
+```
+
+#### Get PageView Counts
+Returns the number of page views that each Wikipedia article had in August 2021.
+
+**Endpoint:** `POST /get_pageview`
+
+**Request:**
+```bash
+curl -X POST "http://<SERVER_IP>:8080/get_pageview" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
+```
+
+**Response:**
+```json
+[15234, 8921, 4567]
+```
+
+**Python Example:**
+```python
+import requests
+
+# Get page views for specific documents
+doc_ids = [12345, 67890, 11111]
+response = requests.post(
+    "http://<SERVER_IP>:8080/get_pageview",
+    json=doc_ids
+)
+pageview_counts = response.json()
+# Returns: [15234, 8921, 4567]
+```
+
+**Note:** If a document ID is not found, the endpoint returns `0.0` for PageRank or `0` for PageView.
+
 ---
 
 ## ⚙️ Ranking Algorithms
@@ -192,7 +258,7 @@ LSI reranking on top-K results for semantic similarity:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `LSI_TOP_K` | Number of results to rerank | 100 |
-| `LSI_WEIGHT` | LSI weight in fusion | 0.25 |
+| `LSI_WEIGHT` | LSI weight in fusion | 0.0 |
 | `LSI_N_COMPONENTS` | Latent dimensions | 100 |
 
 ### TF-IDF Cosine Similarity (`/search_body` Endpoint)
@@ -212,17 +278,21 @@ score(D, Q) = number of query terms found in document
 initial_score = (
     body_weight * BM25_body(q, d) +
     title_weight * binary_title(q, d) +
-    anchor_weight * binary_anchor(q, d) +
-    pagerank_boost * log(1 + pagerank(d)) +
-    pageview_boost * log(1 + pageviews(d))
+    anchor_weight * binary_anchor(q, d)
 )
 
-# Step 2: LSI reranking on top-K
+# Step 2: Add PageRank and PageView boosts (normalized)
+pr_normalized = pagerank(d) / max_pagerank_in_candidates
+pv_normalized = pageviews(d) / max_pageviews_in_candidates
+boosted_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * pv_normalized
+
+# Step 3: LSI reranking on top-K
 if LSI_WEIGHT > 0:
-    top_k_results = get_top_k(initial_score, k=LSI_TOP_K)
+    top_k_results = get_top_k(boosted_score, k=LSI_TOP_K)
     lsi_score = LSI_similarity(q, d)
-    final_score = blend(initial_score, lsi_score, LSI_WEIGHT)
+    final_score = blend(boosted_score, lsi_score, LSI_WEIGHT)
 ```
+
 
 **Default Weights:**
 | Signal | Weight | Method |
@@ -402,6 +472,16 @@ curl "http://<SERVER_IP>:8080/search_lsi?query=deep+learning"
 
 # Custom weights
 curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
+
+# Get PageRank for documents
+curl -X POST "http://<SERVER_IP>:8080/get_pagerank" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
+
+# Get PageViews for documents
+curl -X POST "http://<SERVER_IP>:8080/get_pageview" \
+  -H "Content-Type: application/json" \
+  -d '[12345, 67890, 11111]'
 ```
 
 ### Live Examples (Current Deployment)
@@ -422,7 +502,7 @@ curl "http://104.198.58.119:8080/search_anchor?query=united+states"
 curl "http://104.198.58.119:8080/search_lsi?query=deep+learning"
 
 # Custom weights
-curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
+curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3&pagerank_boost=0.2&pageview_boost=0.15"
 
 # Get PageRank for documents
 curl -X POST "http://104.198.58.119:8080/get_pagerank" \
