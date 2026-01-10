@@ -23,7 +23,7 @@ if str(parent_dir) not in sys.path:
 from experiments.evaluate import (
     average_precision_at_k,
     load_queries_train,
-    mean_ap_at_k,
+    mean_ap_at_k,  # Alias for average_precision_at_k
 )
 
 BASE_URL = "http://104.198.58.119:8080"
@@ -35,7 +35,6 @@ WEIGHTS = {
     'body': 0.4,
     'title': 0.75,
     'anchor': 1.0,
-    'lsi': 0.0,
     'pagerank': 0.15,
     'pageview': 0.1,
 }
@@ -145,8 +144,8 @@ def evaluate_endpoint(
         "mean_time": sum(times) / len(times) if times else 0.0,
         "max_time": max(times) if times else 0.0,
         "min_time": min(times) if times else 0.0,
-        "map_at_10": mean_ap_at_k(all_pred, gold, k=10),
-        "map_at_5": mean_ap_at_k(all_pred, gold, k=5),
+        "avg_precision_at_10": average_precision_at_k(all_pred, gold, k=10),
+        "avg_precision_at_5": average_precision_at_k(all_pred, gold, k=5),
         "harmonic_mean_p5_f1_30": 0.0,
     }
     
@@ -208,7 +207,6 @@ def query_with_weights(query: str, weights: Dict[str, float]) -> Tuple[List[int]
         'body_weight': weights.get('body', 1.0),
         'title_weight': weights.get('title', 0.35),
         'anchor_weight': weights.get('anchor', 0.25),
-        'lsi_weight': weights.get('lsi', 0.0),
         'pagerank_boost': weights.get('pagerank', 0.15),
         'pageview_boost': weights.get('pageview', 0.10),
     }
@@ -256,7 +254,7 @@ def main():
     
     print(f"\nEvaluating on {len(test_queries)} queries:")
     print(f"  body={WEIGHTS['body']}, title={WEIGHTS['title']}, anchor={WEIGHTS['anchor']}")
-    print(f"  lsi={WEIGHTS['lsi']}, pagerank={WEIGHTS['pagerank']}, pageview={WEIGHTS['pageview']}")
+    print(f"  pagerank={WEIGHTS['pagerank']}, pageview={WEIGHTS['pageview']}")
     print("-" * 60)
     
     all_pred = {}
@@ -271,8 +269,8 @@ def main():
     print()
     
     # Calculate all metrics
-    map_at_10 = mean_ap_at_k(all_pred, gold, k=10)
-    map_at_5 = mean_ap_at_k(all_pred, gold, k=5)
+    avg_precision_at_10 = average_precision_at_k(all_pred, gold, k=10)
+    avg_precision_at_5 = average_precision_at_k(all_pred, gold, k=5)
     
     precisions_5 = []
     recalls_30 = []
@@ -304,15 +302,14 @@ def main():
     print(f"  body:     {WEIGHTS['body']:.2f}")
     print(f"  title:    {WEIGHTS['title']:.2f}")
     print(f"  anchor:   {WEIGHTS['anchor']:.2f}")
-    print(f"  lsi:      {WEIGHTS['lsi']:.2f}")
     print(f"  pagerank: {WEIGHTS['pagerank']:.2f}")
     print(f"  pageview: {WEIGHTS['pageview']:.2f}")
     
     print(f"\nQueries tested: {len(test_queries)}")
     
     print("\nMetrics:")
-    print(f"  MAP@10:        {map_at_10:.4f}")
-    print(f"  MAP@5:         {map_at_5:.4f}")
+    print(f"  Average Precision@10:        {avg_precision_at_10:.4f}")
+    print(f"  Average Precision@5:         {avg_precision_at_5:.4f}")
     print(f"  Precision@5:   {sum(precisions_5)/len(precisions_5):.4f}")
     print(f"  Recall@30:     {sum(recalls_30)/len(recalls_30):.4f}")
     print(f"  F1@30:         {sum(f1_scores_30)/len(f1_scores_30):.4f}")

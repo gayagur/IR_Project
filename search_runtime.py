@@ -15,8 +15,6 @@ from ranking.bm25 import BM25FromIndex
 from ranking.tfidf_cosine import search_tfidf_cosine
 from ranking.merge import merge_rankings
 
-if TYPE_CHECKING:
-    from ranking.lsi import LSISearcher
 
 
 def _load_pickle(path: str | Path, default, bucket_name=None):
@@ -108,7 +106,7 @@ class SearchEngine:
     title_index_dir: str = ""
     anchor_index_dir: str = ""
     bucket_name: Optional[str] = None
-    body_lsi: Optional['LSISearcher'] = None  # Forward reference
+    glove_embeddings: Optional[Dict] = None  # GloVe document embeddings
 
     def tokenize_query(self, query: str) -> List[str]:
         return tokenize(query)
@@ -155,62 +153,6 @@ class SearchEngine:
             bucket_name=self.bucket_name,
         )
     
-    def search_body_lsi(self, q_tokens: List[str], *, top_n: int = 100) -> List[Tuple[int, float]]:
-        """Search using LSI (Latent Semantic Indexing)."""
-        if self.body_lsi is None:
-            return []
-        return self.body_lsi.search(q_tokens, top_n=top_n)
-
-    def rerank_with_lsi(
-        self,
-        q_tokens: List[str],
-        candidate_results: List[Tuple[int, float]],
-        *,
-        top_k: int = 100,
-        lsi_weight: float = 1.0,
-    ) -> List[Tuple[int, float]]:
-        """
-        Rerank top K candidate results using LSI and combine with original scores.
-        Optimized: only reranks the top K candidates, then merges with original scores.
-        
-        Args:
-            q_tokens: Query tokens
-            candidate_results: List of (doc_id, score) tuples to rerank
-            top_k: Number of top candidates to rerank
-            lsi_weight: Weight to apply to LSI scores (default: 1.0, meaning replace original)
-            
-        Returns:
-            Reranked list of (doc_id, score) tuples
-        """
-        if self.body_lsi is None or not candidate_results:
-            return candidate_results
-        
-        # Take top K candidates
-        top_candidates = candidate_results[:top_k]
-        candidate_doc_ids = [doc_id for doc_id, _ in top_candidates]
-        
-        # Rerank with LSI (only on top K candidates - much faster)
-        lsi_reranked = self.body_lsi.rerank(q_tokens, candidate_doc_ids)
-        
-        # Create a mapping from doc_id to LSI score for fast lookup
-        lsi_scores = {doc_id: score for doc_id, score in lsi_reranked}
-        
-        # Combine: blend LSI scores with original scores based on lsi_weight
-        combined = []
-        for doc_id, original_score in candidate_results:
-            if doc_id in lsi_scores:
-                # Blend LSI score with original score
-                lsi_score = lsi_scores[doc_id]
-                blended_score = original_score * (1.0 - lsi_weight) + lsi_score * lsi_weight
-                combined.append((doc_id, blended_score))
-            else:
-                # Keep original score for documents not in top K
-                combined.append((doc_id, original_score))
-        
-        # Sort by score descending
-        combined.sort(key=lambda x: (-x[1], x[0]))
-        
-        return combined
 
     def _count_index_matches(
         self,
@@ -280,7 +222,6 @@ class SearchEngine:
         body_ranked: List[Tuple[int, float]],
         title_ranked: List[Tuple[int, float]],
         anchor_ranked: List[Tuple[int, float]],
-        lsi_ranked: Optional[List[Tuple[int, float]]] = None,
         top_n: int = 100,
         # Optional custom weights (if None, uses config values)
         # NOTE: These parameters are optional and backward-compatible.
@@ -288,7 +229,6 @@ class SearchEngine:
         body_weight: Optional[float] = None,
         title_weight: Optional[float] = None,
         anchor_weight: Optional[float] = None,
-        lsi_weight: Optional[float] = None,
         pagerank_boost: Optional[float] = None,
         pageview_boost: Optional[float] = None,
     ) -> List[Tuple[int, float]]:
@@ -303,7 +243,6 @@ class SearchEngine:
         body_w = body_weight if body_weight is not None else getattr(config, 'BODY_WEIGHT', 1.0)
         title_w = title_weight if title_weight is not None else getattr(config, 'TITLE_WEIGHT', 0.35)
         anchor_w = anchor_weight if anchor_weight is not None else getattr(config, 'ANCHOR_WEIGHT', 0.25)
-        lsi_w = lsi_weight if lsi_weight is not None else getattr(config, 'LSI_WEIGHT', 0.25)
         pr_boost = pagerank_boost if pagerank_boost is not None else getattr(config, 'PAGERANK_BOOST', 0.15)
         pv_boost = pageview_boost if pageview_boost is not None else getattr(config, 'PAGEVIEW_BOOST', 0.10)
         
@@ -313,10 +252,6 @@ class SearchEngine:
             (title_ranked, title_w),
             (anchor_ranked, anchor_w),
         ]
-        
-        # Add LSI if available and weight > 0
-        if lsi_ranked and lsi_w > 0:
-            ranking_list.append((lsi_ranked, lsi_w))
         
         merged = merge_rankings(ranking_list, top_n=max(500, top_n))
 
@@ -352,6 +287,70 @@ class SearchEngine:
 
         rescored.sort(key=lambda x: (-x[1], x[0]))
         return rescored[:top_n]
+
+    def rerank_with_glove(
+        self,
+        q_tokens: List[str],
+        candidate_results: List[Tuple[int, float]],
+        *,
+        beta: float = 0.2,
+        candidate_pool: int = 150,
+        top_k: int = 10,
+    ) -> List[Tuple[int, float]]:
+        """
+        Rerank candidates using GloVe document embeddings.
+        
+        Args:
+            q_tokens: Query tokens
+            candidate_results: List of (doc_id, score) tuples to rerank
+            beta: Weight for GloVe score: final = base_score + beta * cosine
+            candidate_pool: Number of candidates to consider
+            top_k: Number of top documents to use for query embedding
+            
+        Returns:
+            Reranked list of (doc_id, score) tuples
+        """
+        if self.glove_embeddings is None or not candidate_results:
+            return candidate_results
+        
+        try:
+            import numpy as np
+            
+            candidates = candidate_results[:candidate_pool]
+            candidate_doc_ids = [doc_id for doc_id, _ in candidates]
+            
+            # Query embedding = average of top_k document embeddings
+            doc_embeddings_for_query = []
+            for doc_id in candidate_doc_ids[:top_k]:
+                if doc_id in self.glove_embeddings:
+                    doc_embeddings_for_query.append(self.glove_embeddings[doc_id])
+            
+            if not doc_embeddings_for_query:
+                return candidate_results
+            
+            query_embedding = np.mean(doc_embeddings_for_query, axis=0)
+            query_embedding = query_embedding / (np.linalg.norm(query_embedding) + 1e-8)
+            
+            # Compute cosine similarity for each candidate
+            cosine_scores = {}
+            for doc_id in candidate_doc_ids:
+                if doc_id in self.glove_embeddings:
+                    cosine_scores[doc_id] = float(np.dot(query_embedding, self.glove_embeddings[doc_id]))
+                else:
+                    cosine_scores[doc_id] = 0.0
+            
+            # Combine: final = base_score + beta * cosine
+            combined = []
+            for doc_id, base_score in candidate_results:
+                final_score = base_score + beta * cosine_scores.get(doc_id, 0.0)
+                combined.append((doc_id, final_score))
+            
+            combined.sort(key=lambda x: (-x[1], x[0]))
+            return combined
+            
+        except Exception as e:
+            print(f"[WARNING] GloVe reranking failed: {e}")
+            return candidate_results
 
 
 _ENGINE: Optional[SearchEngine] = None
@@ -646,96 +645,46 @@ def get_engine() -> SearchEngine:
         traceback.print_exc()
         body_bm25 = None
 
-    # Only load LSI if weight > 0 (skip entirely if disabled)
-    body_lsi = None
-    lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
-    if lsi_weight > 0:
-        print("Checking for LSI index...")
+    # Load GloVe embeddings (if enabled)
+    glove_embeddings = None
+    enable_glove = getattr(config, 'ENABLE_GLOVE', False)
+    if enable_glove:
+        print("Loading GloVe document embeddings...")
         try:
-            from ranking.lsi import LSISearcher
-            from pathlib import Path
-            
-            # Get LSI paths
+            glove_path = config.GLOVE_EMBEDDINGS_PATH
             if bucket_name:
-                # Reading from GCS - paths are strings
-                lsi_vectors_path = config.LSI_VECTORS_PATH
-                svd_components_path = config.LSI_SVD_COMPONENTS_PATH
-                term_to_idx_path = config.TERM_TO_IDX_PATH
-                doc_to_idx_path = config.DOC_TO_IDX_PATH
-            else:
-                # Reading from local filesystem - paths are Path objects
-                lsi_vectors_path = Path(config.LSI_VECTORS_PATH)
-                svd_components_path = Path(config.LSI_SVD_COMPONENTS_PATH)
-                term_to_idx_path = Path(config.TERM_TO_IDX_PATH)
-                doc_to_idx_path = Path(config.DOC_TO_IDX_PATH)
-            
-            # Check if all LSI files exist
-            if bucket_name:
-                # Check in GCS
+                # Try to load from GCS
                 from google.cloud import storage
                 from inverted_index_gcp import get_bucket
                 gcs_bucket = get_bucket(bucket_name)
-                
-                all_exist = (
-                    gcs_bucket.blob(lsi_vectors_path).exists() and
-                    gcs_bucket.blob(svd_components_path).exists() and
-                    gcs_bucket.blob(term_to_idx_path).exists() and
-                    gcs_bucket.blob(doc_to_idx_path).exists()
-                )
-            else:
-                # Check locally
-                all_exist = all(
-                    p.exists() for p in [lsi_vectors_path, svd_components_path, term_to_idx_path, doc_to_idx_path]
-                )
-            
-            if all_exist:
-                if bucket_name:
-                    # Download LSI files temporarily for loading
+                blob = gcs_bucket.blob(str(glove_path))
+                if blob.exists():
                     import tempfile
-                    import os
-                    temp_dir = Path(tempfile.mkdtemp())
-                    try:
-                        for gcs_path, local_name in [
-                            (lsi_vectors_path, "lsi_vectors.pkl"),
-                            (svd_components_path, "svd_components.pkl"),
-                            (term_to_idx_path, "term_to_idx.pkl"),
-                            (doc_to_idx_path, "doc_to_idx.pkl"),
-                        ]:
-                            blob = gcs_bucket.blob(gcs_path)
-                            local_path = temp_dir / local_name
-                            blob.download_to_filename(str(local_path))
-                        
-                        body_lsi = LSISearcher(
-                            lsi_vectors_path=temp_dir / "lsi_vectors.pkl",
-                            svd_components_path=temp_dir / "svd_components.pkl",
-                            term_to_idx_path=temp_dir / "term_to_idx.pkl",
-                            doc_to_idx_path=temp_dir / "doc_to_idx.pkl",
-                            n_components=config.LSI_N_COMPONENTS,
-                        )
-                        print("  ✓ LSI initialized (loaded from GCS)")
-                    finally:
-                        # Clean up temp files
-                        import shutil
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    temp_path = Path(tempfile.mktemp(suffix='.pkl'))
+                    blob.download_to_filename(str(temp_path))
+                    with open(temp_path, 'rb') as f:
+                        glove_data = pickle.load(f)
+                    glove_embeddings = glove_data.get('embeddings', {})
+                    temp_path.unlink()
+                    print(f"  ✓ GloVe embeddings loaded: {len(glove_embeddings):,} documents")
                 else:
-                    body_lsi = LSISearcher(
-                        lsi_vectors_path=lsi_vectors_path,
-                        svd_components_path=svd_components_path,
-                        term_to_idx_path=term_to_idx_path,
-                        doc_to_idx_path=doc_to_idx_path,
-                        n_components=config.LSI_N_COMPONENTS,
-                    )
-                    print("  ✓ LSI initialized")
+                    print("  ⚠ GloVe embeddings not found in GCS")
             else:
-                print("  ⚠ LSI files not found, skipping LSI")
-        except ImportError:
-            print("  ⚠ LSI module not available (numpy/scikit-learn not installed?)")
+                # Load from local filesystem
+                glove_path = Path(glove_path)
+                if glove_path.exists():
+                    with open(glove_path, 'rb') as f:
+                        glove_data = pickle.load(f)
+                    glove_embeddings = glove_data.get('embeddings', {})
+                    print(f"  ✓ GloVe embeddings loaded: {len(glove_embeddings):,} documents")
+                else:
+                    print("  ⚠ GloVe embeddings not found locally")
         except Exception as e:
-            print(f"  ⚠ Failed to initialize LSI: {e}")
+            print(f"  ⚠ Failed to load GloVe embeddings: {e}")
             import traceback
             traceback.print_exc()
     else:
-        print("LSI weight is 0, skipping LSI initialization entirely")
+        print("GloVe disabled, skipping embeddings load")
 
     print("Creating SearchEngine object...")
     try:
@@ -750,11 +699,11 @@ def get_engine() -> SearchEngine:
             pagerank=pagerank,
             pageviews=pageviews,
             body_bm25=body_bm25,
-            body_lsi=body_lsi,
             body_index_dir=body_dir,
             title_index_dir=title_dir,
             anchor_index_dir=anchor_dir,
             bucket_name=bucket_name,
+            glove_embeddings=glove_embeddings,
         )
         print("=" * 60)
         print("✓ Search engine loaded successfully!")

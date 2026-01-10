@@ -69,24 +69,11 @@ TITLES_PATH = (GCS_AUX_DIR + "/titles.pkl") if USE_GCS_PATHS else (AUX_DIR / "ti
 PAGERANK_PATH = (GCS_AUX_DIR + "/pagerank.pkl") if USE_GCS_PATHS else (AUX_DIR / "pagerank.pkl")
 PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if USE_GCS_PATHS else (AUX_DIR / "pageviews.pkl")
 
-# ============================================================================
-# LSI configuration (optional)
-# ============================================================================
-LSI_DIR = (GCS_AUX_DIR + "/lsi") if USE_GCS_PATHS else (AUX_DIR / "lsi")
-LSI_VECTORS_PATH = (LSI_DIR + "/lsi_vectors.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "lsi_vectors.pkl")
-LSI_SVD_COMPONENTS_PATH = (LSI_DIR + "/svd_components.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "svd_components.pkl")
-TERM_TO_IDX_PATH = (LSI_DIR + "/term_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "term_to_idx.pkl")
-DOC_TO_IDX_PATH = (LSI_DIR + "/doc_to_idx.pkl") if USE_GCS_PATHS else (AUX_DIR / "lsi" / "doc_to_idx.pkl")
-
-LSI_N_COMPONENTS = 100
-LSI_MAX_TERMS = 50000
-LSI_MAX_DOCS = None  # None = all documents
-LSI_TOP_K = 100  # Number of top results to rerank with LSI
 
 # ============================================================================
 # BM25 parameters
 # ============================================================================
-# BM25 scoring parameters (tuned for best MAP@10 performance)
+# BM25 scoring parameters (tuned for best Average Precision@10 performance)
 BM25_K1 = 2.5  # Term frequency saturation parameter (default: 2.5)
 BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no normalization)
 
@@ -98,11 +85,23 @@ BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no norma
 BODY_WEIGHT = 0.4      # BM25 body search weight
 TITLE_WEIGHT = 0.75    # Title match weight
 ANCHOR_WEIGHT = 1.0   # Anchor text weight
-LSI_WEIGHT = 0.0      # LSI weight (set to 0.0 to disable LSI)
 
 # PageRank and PageView boost weights (applied after merging)
 PAGERANK_BOOST = 0.15  # PageRank boost weight
 PAGEVIEW_BOOST = 0.10  # PageView boost weight
+
+# ============================================================================
+# GloVe semantic features configuration
+# ============================================================================
+ENABLE_GLOVE = True  # Enable GloVe-based semantic reranking (set to False to disable)
+GLOVE_BETA = 2.7  # Weight for GloVe score: final = base_score + beta * cosine
+GLOVE_CANDIDATE_POOL = 150  # Number of candidates to consider for GloVe reranking
+GLOVE_TOP_K = 12  # Number of top documents to use for query embedding
+
+# GloVe paths
+GLOVE_EMBEDDINGS_PATH = (GCS_AUX_DIR + "/glove_doc_embeddings.pkl") if USE_GCS_PATHS else (AUX_DIR / "glove_doc_embeddings.pkl")
+GLOVE_VECTORS_PATH = None  # Path to pretrained GloVe vectors file (set this to your GloVe file path)
+GLOVE_DIM = 300  # GloVe vector dimension (default: 300)
 
 # ============================================================================
 # Indexing parameters

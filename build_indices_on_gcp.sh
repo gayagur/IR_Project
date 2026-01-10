@@ -112,24 +112,6 @@ nohup python3 -m indexing.build_indices \
 PAGERANK_PID=\$!
 echo "PageRank build started (PID: \$PAGERANK_PID)"
 
-# Build LSI (needs body index and doc_norms, so wait for body to finish)
-echo ""
-echo "Waiting for body index to finish before building LSI..."
-while ps -p \$ALL_PID > /dev/null; do
-    sleep 60
-    echo "  Still building body/title/anchor indices..."
-done
-echo "Body/title/anchor indices completed!"
-
-echo ""
-echo "Building LSI index..."
-nohup python3 -m indexing.build_indices \
-  --dump "gs://${BUCKET_NAME}/raw/wikidata20210801_preprocessed/" \
-  --build lsi \
-  --parquet > build_lsi.log 2>&1 &
-
-LSI_PID=\$!
-echo "LSI build started (PID: \$LSI_PID)"
 
 echo ""
 echo "=========================================="
@@ -140,7 +122,6 @@ echo "Processes:"
 echo "  - Body/title/anchor: COMPLETED"
 echo "  - PageViews: PID \$PAGEVIEWS_PID"
 echo "  - PageRank: PID \$PAGERANK_PID"
-echo "  - LSI: PID \$LSI_PID"
 echo ""
 echo "You can disconnect - processes will continue."
 echo ""
@@ -148,7 +129,6 @@ echo "To check progress:"
 echo "  tail -f ~/IR_Project/build_all.log"
 echo "  tail -f ~/IR_Project/build_pageviews.log"
 echo "  tail -f ~/IR_Project/build_pagerank.log"
-echo "  tail -f ~/IR_Project/build_lsi.log"
 echo ""
 echo "To check if processes are still running:"
 echo "  ps aux | grep build_indices | grep -v grep"

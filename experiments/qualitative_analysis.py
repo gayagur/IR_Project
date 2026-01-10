@@ -23,7 +23,6 @@ WEIGHTS = {
     'body': 0.4,
     'title': 1.0,
     'anchor': 0.75,
-    'lsi': 0.0,
     'pagerank': 0.15,
     'pageview': 0.10,
 }
@@ -36,7 +35,6 @@ def query_search(query: str) -> list:
         'body_weight': WEIGHTS['body'],
         'title_weight': WEIGHTS['title'],
         'anchor_weight': WEIGHTS['anchor'],
-        'lsi_weight': WEIGHTS['lsi'],
         'pagerank_boost': WEIGHTS['pagerank'],
         'pageview_boost': WEIGHTS['pageview'],
     }

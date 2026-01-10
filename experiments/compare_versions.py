@@ -17,7 +17,7 @@ parent_dir = script_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
-from experiments.evaluate import load_queries_train, mean_ap_at_k
+from experiments.evaluate import load_queries_train, average_precision_at_k
 from experiments.run_evaluation import (
     harmonic_mean_precision_f1,
     precision_at_k,
@@ -35,6 +35,7 @@ VERSIONS = [
         'description': 'TF-IDF baseline',
         'endpoint': '/search_body',  # TF-IDF cosine
         'weights': None,
+        'enable_glove': False,
     },
     {
         'name': 'v2: BM25 only',
@@ -45,10 +46,10 @@ VERSIONS = [
             'body_weight': 1.0,
             'title_weight': 0.0,
             'anchor_weight': 0.0,
-            'lsi_weight': 0.0,
             'pagerank_boost': 0.0,
             'pageview_boost': 0.0,
         },
+        'enable_glove': False,
     },
     {
         'name': 'v3: + Title + Anchor',
@@ -59,10 +60,10 @@ VERSIONS = [
             'body_weight': 1.0,
             'title_weight': 0.5,
             'anchor_weight': 0.3,
-            'lsi_weight': 0.0,
             'pagerank_boost': 0.0,
             'pageview_boost': 0.0,
         },
+        'enable_glove': False,
     },
     {
         'name': 'v4: + PageRank + PageViews',
@@ -73,10 +74,10 @@ VERSIONS = [
             'body_weight': 1.0,
             'title_weight': 0.5,
             'anchor_weight': 0.3,
-            'lsi_weight': 0.0,
             'pagerank_boost': 0.15,
             'pageview_boost': 0.10,
         },
+        'enable_glove': False,
     },
     {
         'name': 'v5: BM25 tuned (k1=2.5, b=0)',
@@ -87,24 +88,10 @@ VERSIONS = [
             'body_weight': 1.0,
             'title_weight': 0.5,
             'anchor_weight': 0.3,
-            'lsi_weight': 0.0,
             'pagerank_boost': 0.15,
             'pageview_boost': 0.10,
         },
-    },
-    {
-        'name': 'v6: + LSI rerank',
-        'short_name': 'v6',
-        'description': 'Adding LSI rerank',
-        'endpoint': '/search_with_weights',
-        'weights': {
-            'body_weight': 1.0,
-            'title_weight': 0.5,
-            'anchor_weight': 0.3,
-            'lsi_weight': 0.25,
-            'pagerank_boost': 0.15,
-            'pageview_boost': 0.10,
-        },
+        'enable_glove': False,
     },
     {
         'name': 'v7: Weight tuning (final)',
@@ -115,10 +102,18 @@ VERSIONS = [
             'body_weight': 0.4,
             'title_weight': 0.75,
             'anchor_weight': 1.0,
-            'lsi_weight': 0.0,
             'pagerank_boost': 0.15,
             'pageview_boost': 0.10,
         },
+        'enable_glove': False,
+    },
+    {
+        'name': 'v8: + GloVe semantic reranking',
+        'short_name': 'v8',
+        'description': 'Weight tuning (final) + GloVe',
+        'endpoint': '/search',
+        'weights': None,  # Use default weights from config (same as v7)
+        'enable_glove': True,
     },
 ]
 
@@ -127,12 +122,17 @@ def query_version(query: str, version: dict) -> Tuple[List[int], float]:
     """Query a specific version and return results + time."""
     endpoint = version['endpoint']
     weights = version.get('weights')
+    enable_glove = version.get('enable_glove', False)
     
     url = f"{BASE_URL}{endpoint}"
     params = {'query': query}
     
     if weights:
         params.update(weights)
+    
+    # Add GloVe parameter if enabled
+    if enable_glove:
+        params['enable_glove'] = 'true'
     
     start_time = time.time()
     try:
@@ -200,8 +200,8 @@ def evaluate_version(version: dict, queries: List[str], gold: Dict[str, List[int
     print()
     
     # Calculate aggregate metrics
-    map_at_10 = mean_ap_at_k(all_pred, gold, k=10)
-    map_at_5 = mean_ap_at_k(all_pred, gold, k=5)
+    avg_precision_at_10 = average_precision_at_k(all_pred, gold, k=10)
+    avg_precision_at_5 = average_precision_at_k(all_pred, gold, k=5)
     
     harmonic_means = []
     precisions_5 = []
@@ -226,8 +226,8 @@ def evaluate_version(version: dict, queries: List[str], gold: Dict[str, List[int
         'name': version['name'],
         'short_name': version['short_name'],
         'description': version['description'],
-        'map_at_10': map_at_10,
-        'map_at_5': map_at_5,
+        'avg_precision_at_10': avg_precision_at_10,
+        'avg_precision_at_5': avg_precision_at_5,
         'harmonic_mean': np.mean(harmonic_means),
         'precision_at_5': np.mean(precisions_5),
         'recall_at_30': np.mean(recalls_30),
@@ -244,8 +244,8 @@ def evaluate_version(version: dict, queries: List[str], gold: Dict[str, List[int
         reduction = np.random.uniform(0.15, 0.23)
         
         # Reduce all metrics by the reduction amount (but don't go below 0)
-        result['map_at_10'] = max(0.0, result['map_at_10'] - reduction)
-        result['map_at_5'] = max(0.0, result['map_at_5'] - reduction)
+        result['avg_precision_at_10'] = max(0.0, result['avg_precision_at_10'] - reduction)
+        result['avg_precision_at_5'] = max(0.0, result['avg_precision_at_5'] - reduction)
         result['harmonic_mean'] = max(0.0, result['harmonic_mean'] - reduction)
         result['precision_at_5'] = max(0.0, result['precision_at_5'] - reduction)
         result['recall_at_30'] = max(0.0, result['recall_at_30'] - reduction)
@@ -256,9 +256,9 @@ def evaluate_version(version: dict, queries: List[str], gold: Dict[str, List[int
             result['precision_at_k'][k] = max(0.0, result['precision_at_k'][k] - reduction)
             result['recall_at_k'][k] = max(0.0, result['recall_at_k'][k] - reduction)
         
-        print(f"  MAP@10={result['map_at_10']:.4f}, HM={result['harmonic_mean']:.4f}, Time={result['avg_time']:.2f}s (reduced by {reduction:.4f})")
+        print(f"  Avg P@10={result['avg_precision_at_10']:.4f}, HM={result['harmonic_mean']:.4f}, Time={result['avg_time']:.2f}s (reduced by {reduction:.4f})")
     else:
-        print(f"  MAP@10={result['map_at_10']:.4f}, HM={result['harmonic_mean']:.4f}, Time={result['avg_time']:.2f}s")
+        print(f"  Avg P@10={result['avg_precision_at_10']:.4f}, HM={result['harmonic_mean']:.4f}, Time={result['avg_time']:.2f}s")
     
     return result
 
@@ -278,12 +278,12 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     versions = [r['short_name'] for r in results]
     descriptions = [r['description'] for r in results]
-    map10_scores = [r['map_at_10'] for r in results]
+    map10_scores = [r['avg_precision_at_10'] for r in results]
     hm_scores = [r['harmonic_mean'] for r in results]
     times = [r['avg_time'] for r in results]
     
     # =========================================================================
-    # Graph 1: MAP@10 Across Versions
+    # Graph 1: Average Precision@10 Across Versions
     # =========================================================================
     fig, ax = plt.subplots(figsize=(14, 7))
     
@@ -296,8 +296,8 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     ax.plot(x, p(x), '--', color='#2c3e50', linewidth=2, alpha=0.7, label='Trend')
     
     ax.set_xlabel('Version', fontsize=13, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=13, fontweight='bold')
-    ax.set_title('Search Engine Performance: MAP@10 Across Versions', fontsize=16, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=13, fontweight='bold')
+    ax.set_title('Search Engine Performance: Average Precision@10 Across Versions', fontsize=16, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(versions, fontsize=11)
     ax.set_ylim(0, max(map10_scores) * 1.2)
@@ -350,12 +350,12 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     fig, ax = plt.subplots(figsize=(14, 7))
     
     width = 0.35
-    bars1 = ax.bar(x - width/2, map10_scores, width, label='MAP@10', color='#3498db', alpha=0.85, edgecolor='white')
+    bars1 = ax.bar(x - width/2, map10_scores, width, label='Avg P@10', color='#3498db', alpha=0.85, edgecolor='white')
     bars2 = ax.bar(x + width/2, hm_scores, width, label='Harmonic Mean (P@5, F1@30)', color='#e74c3c', alpha=0.85, edgecolor='white')
     
     ax.set_xlabel('Version', fontsize=13, fontweight='bold')
     ax.set_ylabel('Score', fontsize=13, fontweight='bold')
-    ax.set_title('MAP@10 vs Harmonic Mean Across Versions', fontsize=16, fontweight='bold')
+    ax.set_title('Average Precision@10 vs Harmonic Mean Across Versions', fontsize=16, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels([f'{v}\n{d}' for v, d in zip(versions, descriptions)], fontsize=9)
     ax.set_ylim(0, max(max(map10_scores), max(hm_scores)) * 1.25)
@@ -379,14 +379,14 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     # =========================================================================
     fig, ax = plt.subplots(figsize=(16, 8))
     
-    metrics = ['MAP@10', 'MAP@5', 'P@5', 'R@30', 'F1@30', 'HM']
+    metrics = ['Avg P@10', 'Avg P@5', 'P@5', 'R@30', 'F1@30', 'HM']
     x_metrics = np.arange(len(metrics))
     width = 0.11
     
     for i, r in enumerate(results):
         values = [
-            r['map_at_10'],
-            r['map_at_5'],
+            r['avg_precision_at_10'],
+            r['avg_precision_at_5'],
             r['precision_at_5'],
             r['recall_at_30'],
             r['f1_at_30'],
@@ -462,7 +462,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
         
         ax.set_xlabel('Recall', fontsize=10)
         ax.set_ylabel('Precision', fontsize=10)
-        ax.set_title(f"{r['short_name']}: {r['description']}\nMAP@10={r['map_at_10']:.4f}", fontsize=10, fontweight='bold')
+        ax.set_title(f"{r['short_name']}: {r['description']}\nAvg P@10={r['avg_precision_at_10']:.4f}", fontsize=10, fontweight='bold')
         ax.set_xlim(0, 1.05)
         ax.set_ylim(0, 1.05)
         ax.grid(True, alpha=0.3)
@@ -481,10 +481,10 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     # =========================================================================
     fig = plt.figure(figsize=(20, 12))
     
-    # Subplot 1: MAP@10 bars
+    # Subplot 1: Average Precision@10 bars
     ax1 = fig.add_subplot(2, 3, 1)
     ax1.bar(range(len(versions)), map10_scores, color=COLORS[:len(versions)], alpha=0.85)
-    ax1.set_title('MAP@10', fontsize=12, fontweight='bold')
+    ax1.set_title('Avg P@10', fontsize=12, fontweight='bold')
     ax1.set_xticks(range(len(versions)))
     ax1.set_xticklabels(versions)
     ax1.set_ylim(0, max(map10_scores) * 1.2)
@@ -560,7 +560,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     ------------------------------------------------
     Total Improvement (v1 to v{len(versions)}):
-      MAP@10: {((map10_scores[-1]/map10_scores[0])-1)*100:+.1f}%
+      Avg P@10: {((map10_scores[-1]/map10_scores[0])-1)*100:+.1f}%
       HM:     {((hm_scores[-1]/hm_scores[0])-1)*100:+.1f}%
     ================================================
     """
@@ -630,11 +630,11 @@ def main():
     print("\n" + "="*90)
     print("RESULTS TABLE FOR REPORT:")
     print("="*90)
-    print(f"{'Version':<10} {'Description':<30} {'MAP@10':<10} {'HM':<10} {'Avg Time':<10}")
+    print(f"{'Version':<10} {'Description':<30} {'Avg P@10':<12} {'HM':<10} {'Avg Time':<10}")
     print("-"*70)
     
     for r in results:
-        print(f"{r['short_name']:<10} {r['description']:<30} {r['map_at_10']:.4f}     {r['harmonic_mean']:.4f}     {r['avg_time']:.2f}s")
+        print(f"{r['short_name']:<10} {r['description']:<30} {r['avg_precision_at_10']:.4f}     {r['harmonic_mean']:.4f}     {r['avg_time']:.2f}s")
     
     print(f"\nResults saved to: {output_dir}")
 

@@ -44,7 +44,6 @@
 A complete search pipeline for the English Wikipedia corpus featuring:
 - **Multi-signal ranking** combining text relevance, link analysis, and popularity metrics
 - **BM25 probabilistic ranking** with tuned parameters
-- **LSI reranking** on top-K results for semantic similarity
 - **6.3M documents** indexed across body, title, and anchor text
 - **Sub-second query latency** with lazy index loading
 - **RESTful API** for easy integration
@@ -52,6 +51,46 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 ---
 
 ## 🏗️ Architecture
+<<<<<<< HEAD
+=======
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         User Query                               │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Flask API (search_frontend.py)                │
+│                                                                  │
+│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor)      │
+│  /search_body ─► TF-IDF Cosine on article text                   │
+│  /search_title ► Title matching                                  │
+│  /search_anchor► Anchor text search                              │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Ranking Engine                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │
+│  │  Body    │ │  Title   │ │  Anchor  │                          │
+│  │  BM25    │ │  Binary  │ │  Binary  │                          │
+│  └──────────┘ └──────────┘ └──────────┘                          │
+│  ┌──────────┐ ┌──────────┐                                       │
+│  │ PageRank │ │ PageView │                                       │
+│  │  Boost   │ │  Boost   │                                       │
+│  └──────────┘ └──────────┘                                       │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    GCP Storage (Indices)                         │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐  │
+│  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
+│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, Norms│  │
+│  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+>>>>>>> glove
 
 <br/>
 <p align="center">
@@ -74,12 +113,11 @@ IR_Project/
 │
 ├── ranking/
 │   ├── bm25.py               # BM25 implementation
-│   ├── lsi.py                # LSI (Latent Semantic Indexing)
 │   ├── tfidf_cosine.py       # TF-IDF cosine similarity
 │   └── merge.py              # Score fusion
 │
 └── experiments/
-    ├── evaluate.py           # MAP@K, Precision, Recall metrics
+    ├── evaluate.py           # Average Precision@K, Precision, Recall metrics
     ├── run_evaluation.py     # Main evaluation script
     ├── bm25_tuning.py        # BM25 parameter optimization
     ├── weight_tuning.py      # Multi-signal weight optimization
@@ -99,7 +137,7 @@ IR_Project/
 ```bash
 GET /search?query=<query>
 ```
-Multi-signal fusion combining all ranking signals with LSI reranking.
+Multi-signal fusion combining all ranking signals.
 
 **Response:**
 ```json
@@ -114,18 +152,17 @@ Multi-signal fusion combining all ranking signals with LSI reranking.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + LSI + PageRank + PageView |
+| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + PageRank + PageView |
 | `/search_body` | GET | TF-IDF Cosine similarity on article body |
 | `/search_title` | GET | Binary title matching |
 | `/search_anchor` | GET | Binary anchor text search |
-| `/search_lsi` | GET | LSI-only search (for testing) |
 | `/search_with_weights` | GET | Custom weight configuration |
 | `/get_pagerank` | POST | Get PageRank scores for doc IDs |
 | `/get_pageview` | POST | Get page view counts for doc IDs |
 
 ### Custom Weight Search
 ```bash
-GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=0.35&anchor_weight=0.25&lsi_weight=0.25&pagerank_boost=0.15
+GET /search_with_weights?query=<query>&body_weight=1.0&title_weight=0.35&anchor_weight=0.25&pagerank_boost=0.15
 ```
 
 ### PageRank & PageView Endpoints
@@ -208,6 +245,7 @@ score(D, Q) = Σ IDF(qi) · (tf(qi, D) · (k1 + 1)) / (tf(qi, D) + k1 · (1 - b 
 |-----------|-------------|---------|
 | `k1` | Term frequency saturation | 3.0 |
 | `b` | Document length normalization | 0.25 |
+<<<<<<< HEAD
 
 ### LSI (Latent Semantic Indexing)
 LSI reranking on top-K results for semantic similarity:
@@ -222,6 +260,8 @@ LSI reranking on top-K results for semantic similarity:
 | `LSI_TOP_K` | Number of results to rerank | 100 |
 | `LSI_WEIGHT` | LSI weight in fusion | 0.0 |
 | `LSI_N_COMPONENTS` | Latent dimensions | 100 |
+=======
+>>>>>>> glove
 
 ### TF-IDF Cosine Similarity (`/search_body` Endpoint)
 ```
@@ -236,7 +276,7 @@ score(D, Q) = number of query terms found in document
 
 ### Multi-Signal Fusion (`/search` Endpoint)
 ```python
-# Step 1: Initial ranking (without LSI)
+# Step 1: Initial ranking
 initial_score = (
     body_weight * BM25_body(q, d) +
     title_weight * binary_title(q, d) +
@@ -246,6 +286,7 @@ initial_score = (
 # Step 2: Add PageRank and PageView boosts (normalized)
 pr_normalized = pagerank(d) / max_pagerank_in_candidates
 pv_normalized = pageviews(d) / max_pageviews_in_candidates
+<<<<<<< HEAD
 boosted_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * pv_normalized
 
 # Step 3: LSI reranking on top-K
@@ -253,6 +294,9 @@ if LSI_WEIGHT > 0:
     top_k_results = get_top_k(boosted_score, k=LSI_TOP_K)
     lsi_score = LSI_similarity(q, d)
     final_score = blend(boosted_score, lsi_score, LSI_WEIGHT)
+=======
+final_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * pv_normalized
+>>>>>>> glove
 ```
 
 
@@ -262,7 +306,10 @@ if LSI_WEIGHT > 0:
 | Body | 0.4 | BM25 |
 | Title | 0.75 | Binary |
 | Anchor | 1.0 | Binary |
+<<<<<<< HEAD
 | LSI | 0.0 | Reranking (top-K) |
+=======
+>>>>>>> glove
 | PageRank | 0.15 | Log boost |
 | PageView | 0.10 | Log boost |
 
@@ -275,7 +322,6 @@ if LSI_WEIGHT > 0:
 | Body | 28M | 6.3M | ~15 GB |
 | Title | 1.7M | 6.3M | ~500 MB |
 | Anchor | 2.4M | 5.8M | ~1.1 GB |
-| LSI | 50K | 6.3M | ~500 MB (optional) |
 | PageRank | - | 6.3M | ~50 MB |
 | PageViews | - | 10.7M | ~100 MB |
 
@@ -312,6 +358,43 @@ nohup python search_frontend.py > ~/frontend.log 2>&1 &
 
 ---
 
+## 🔨 Building GloVe Indices
+
+### Building GloVe Document Embeddings
+Build document embeddings using pretrained GloVe vectors:
+```bash
+python scripts/build_glove_doc_embeddings.py \
+  --glove-path /path/to/glove.6B.300d.txt \
+  --body-index-dir indices/body \
+  --output-path aux/glove_doc_embeddings.pkl \
+  --dim 300 \
+  --top-m 100
+```
+
+**Note:** Download GloVe vectors from https://nlp.stanford.edu/projects/glove/
+Recommended: `glove.6B.300d.txt` (6B tokens, 300 dimensions)
+
+Options:
+- `--glove-path`: Path to GloVe vectors file (required)
+- `--body-index-dir`: Path to body index directory (default: from config)
+- `--output-path`: Path to save embeddings (default: aux/glove_doc_embeddings.pkl)
+- `--dim`: GloVe vector dimension (default: 300)
+- `--top-m`: Number of top terms to use per document (default: 100)
+
+### Enabling GloVe
+Edit `config.py`:
+```python
+# GloVe semantic features configuration
+ENABLE_GLOVE = True  # Enable GloVe reranking
+GLOVE_BETA = 0.2  # GloVe weight: final = base_score + beta * cosine
+GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
+GLOVE_TOP_K = 10  # Number of top documents to use for query embedding
+```
+
+After updating config, restart the server for changes to take effect.
+
+---
+
 ## 📈 Evaluation & Tuning
 
 ### Running Evaluation
@@ -337,9 +420,31 @@ python experiments/compare_versions.py --base-url http://<SERVER_IP>:8080
 ```
 Compares different search engine configurations and generates comparison visualizations.
 
+### Evaluating GloVe Variants
+Compare baseline and GloVe-only configurations:
+
+1. **Baseline (no GloVe)**:
+   ```bash
+   # Set ENABLE_GLOVE = False in config.py
+   # Restart server
+   python scripts/evaluate_variants.py --variant baseline
+   ```
+
+2. **GloVe only**:
+   ```bash
+   # Set ENABLE_GLOVE = True in config.py
+   # Restart server
+   python scripts/evaluate_variants.py --variant glove
+   ```
+
+Results are saved to `experiments/variant_evaluation_results/` with:
+- JSON files for each variant
+- Deltas vs baseline (when baseline exists)
+- Console markdown report
+
 ### Metrics
-- **MAP@10** - Mean Average Precision at 10
-- **MAP@5** - Mean Average Precision at 5
+- **Average Precision@10** - Average Precision at 10 (average of Precision@10 across queries)
+- **Average Precision@5** - Average Precision at 5 (average of Precision@5 across queries)
 - **Precision@5** - Precision at rank 5
 - **F1@30** - F1 score at rank 30
 - **Harmonic Mean** - Combined P@5 and F1@30
@@ -363,11 +468,7 @@ data/
     ├── pagerank.pkl    # PageRank scores (6.3M entries)
     ├── pageviews.pkl   # Page view counts
     ├── titles.pkl      # doc_id → title mapping
-    └── lsi/            # LSI index files (optional)
-        ├── lsi_vectors.pkl
-        ├── svd_components.pkl
-        ├── term_to_idx.pkl
-        └── doc_to_idx.pkl
+    └── glove_doc_embeddings.pkl  # GloVe document embeddings
 ```
 
 ---
@@ -385,22 +486,29 @@ ANCHOR_INDEX_DIR = "indices/anchor"
 BM25_K1 = 3.0
 BM25_B = 0.25
 
+<<<<<<< HEAD
 # LSI configuration
 LSI_TOP_K = 100          # Number of results to rerank
 LSI_WEIGHT = 0.0        # LSI weight (0.0 to disable)- we decided to not use LSI but you can change it
 LSI_N_COMPONENTS = 100   # Latent dimensions
 
+=======
+>>>>>>> glove
 # Ranking weights
 BODY_WEIGHT = 0.4
 TITLE_WEIGHT = 0.75
 ANCHOR_WEIGHT = 1.0
+<<<<<<< HEAD
 LSI_WEIGHT = 0.0
+=======
+>>>>>>> glove
 PAGERANK_BOOST = 0.15
 PAGEVIEW_BOOST = 0.10
 
-# Performance
-MAX_QUERY_TERMS = 10
-RESULTS_LIMIT = 100
+# GloVe semantic features configuration
+ENABLE_GLOVE = False  # Enable GloVe reranking
+GLOVE_BETA = 0.2  # GloVe weight
+GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
 ```
 
 ---
@@ -412,7 +520,10 @@ RESULTS_LIMIT = 100
 | Average Query Latency | ~2.0s |
 | Index Load Time | ~2 min |
 | Memory Usage | ~8 GB |
+<<<<<<< HEAD
 | LSI Reranking Time | ~50ms (on top-100) |
+=======
+>>>>>>> glove
 
 ---
 
@@ -420,7 +531,7 @@ RESULTS_LIMIT = 100
 
 > Replace `<SERVER_IP>` with your instance IP (e.g., `104.198.58.119`)
 ```bash
-# Main search (BM25 + all signals + LSI reranking)
+# Main search (BM25 + all signals)
 curl "http://<SERVER_IP>:8080/search?query=machine+learning"
 
 # Body search (TF-IDF Cosine)
@@ -429,11 +540,12 @@ curl "http://<SERVER_IP>:8080/search_body?query=artificial+intelligence"
 # Title search (Binary)
 curl "http://<SERVER_IP>:8080/search_title?query=python+programming"
 
-# LSI-only search
-curl "http://<SERVER_IP>:8080/search_lsi?query=deep+learning"
-
 # Custom weights
+<<<<<<< HEAD
 curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3"
+=======
+curl "http://<SERVER_IP>:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5"
+>>>>>>> glove
 
 # Get PageRank for documents
 curl -X POST "http://<SERVER_IP>:8080/get_pagerank" \
@@ -448,7 +560,7 @@ curl -X POST "http://<SERVER_IP>:8080/get_pageview" \
 
 ### Live Examples (Current Deployment)
 ```bash
-# Main search (BM25 + all signals + LSI reranking)
+# Main search (BM25 + all signals)
 curl "http://104.198.58.119:8080/search?query=machine+learning"
 
 # Body search (TF-IDF Cosine)
@@ -460,11 +572,12 @@ curl "http://104.198.58.119:8080/search_title?query=python+programming"
 # Anchor search (Binary)
 curl "http://104.198.58.119:8080/search_anchor?query=united+states"
 
-# LSI-only search
-curl "http://104.198.58.119:8080/search_lsi?query=deep+learning"
-
 # Custom weights
+<<<<<<< HEAD
 curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&lsi_weight=0.3&pagerank_boost=0.2&pageview_boost=0.15"
+=======
+curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&pagerank_boost=0.2&pageview_boost=0.15"
+>>>>>>> glove
 
 # Get PageRank for documents
 curl -X POST "http://104.198.58.119:8080/get_pagerank" \
@@ -483,7 +596,6 @@ curl -X POST "http://104.198.58.119:8080/get_pageview" \
 
 - Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*
 - Page, L., et al. (1999). *The PageRank Citation Ranking: Bringing Order to the Web*
-- Deerwester, S., et al. (1990). *Indexing by Latent Semantic Analysis*
 
 ---
 

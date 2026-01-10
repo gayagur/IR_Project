@@ -17,29 +17,161 @@ def internal_error(error):
         "traceback": traceback.format_exc()
     }), 500
 
+# @app.route("/search")
+# def search():
+#     ''' Returns up to a 100 of your best search results for the query. This is 
+#         the place to put forward your best search engine, and you are free to
+#         implement the retrieval whoever you'd like within the bound of the 
+#         project requirements (efficiency, quality, etc.). That means it is up to
+#         you to decide on whether to use stemming, remove stopwords, use 
+#         PageRank, query expansion, etc.
+
+#         To issue a query navigate to a URL like:
+#          http://YOUR_SERVER_DOMAIN/search?query=hello+world
+#         where YOUR_SERVER_DOMAIN is something like XXXX-XX-XX-XX-XX.ngrok.io
+#         if you're using ngrok on Colab or your external IP on GCP.
+#     Returns:
+#     --------
+#         list of up to 100 search results, ordered from best to worst where each 
+#         element is a tuple (wiki_id, title).
+#     '''
+#     res = []
+#     query = request.args.get('query', '')
+#     if len(query) == 0:
+#       return jsonify(res)
+#     # BEGIN SOLUTION
+#     try:
+#         print(f"[SEARCH] Query: '{query}'")
+#         from search_runtime import get_engine
+#         engine = get_engine()
+
+#         q_tokens = engine.tokenize_query(query)
+#         print(f"[SEARCH] Tokenized query: {q_tokens}")
+#         if not q_tokens:
+#             print("[SEARCH] No tokens after tokenization, returning empty results")
+#             return jsonify(res)
+
+#         # Candidates + scores from multiple signals
+#         # Run searches in parallel for faster performance
+#         print("[SEARCH] Searching all indices in parallel...")
+#         from concurrent.futures import ThreadPoolExecutor
+        
+#         # Run body/title/anchor searches in parallel
+#         max_workers = 3
+#         with ThreadPoolExecutor(max_workers=max_workers) as executor:
+#             future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
+#             future_title = executor.submit(engine.search_title_count, q_tokens, top_n=6000)
+#             future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=6000)
+            
+#             # Wait for all to complete
+#             body_ranked = future_body.result()
+#             title_ranked = future_title.result()
+#             anchor_ranked = future_anchor.result()
+        
+#         print(f"[SEARCH] Body results: {len(body_ranked)}")
+#         print(f"[SEARCH] Title results: {len(title_ranked)}")
+#         print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
+
+#         print("[SEARCH] Merging signals...")
+#         # Merge signals
+#         merged = engine.merge_signals(
+#             body_ranked=body_ranked,
+#             title_ranked=title_ranked,
+#             anchor_ranked=anchor_ranked,
+#             top_n=500,  # Get more candidates for PRF/GloVe reranking
+#         )
+#         print(f"[SEARCH] Merged results (before PRF/GloVe): {len(merged)}")
+        
+#         # Check if PRF/GloVe are enabled via query params or config
+#         # Query params override config (for evaluation purposes)
+#         enable_prf_param = request.args.get('enable_prf', None)
+#         enable_glove_param = request.args.get('enable_glove', None)
+        
+#         if enable_prf_param is not None:
+#             enable_prf = enable_prf_param.lower() in ('true', '1', 'yes')
+#         else:
+#             enable_prf = getattr(config, 'ENABLE_PRF', False)
+        
+#         if enable_glove_param is not None:
+#             enable_glove = enable_glove_param.lower() in ('true', '1', 'yes')
+#         else:
+#             enable_glove = getattr(config, 'ENABLE_GLOVE', False)
+        
+#         # Apply PRF reranking if enabled
+#         if enable_prf:
+#             prf_top_k = getattr(config, 'PRF_TOP_K_DOCS', 10)
+#             prf_num_terms = getattr(config, 'PRF_NUM_TERMS', 20)
+#             prf_alpha = getattr(config, 'PRF_ALPHA', 0.3)
+#             prf_pool = getattr(config, 'PRF_CANDIDATE_POOL', 100)
+#             print(f"[SEARCH] Applying PRF reranking (top_k={prf_top_k}, num_terms={prf_num_terms}, alpha={prf_alpha})...")
+#             merged = engine.rerank_with_prf(
+#                 q_tokens,
+#                 merged,
+#                 top_k_docs=prf_top_k,
+#                 num_terms=prf_num_terms,
+#                 alpha=prf_alpha,
+#                 candidate_pool=prf_pool,
+#             )
+#             print(f"[SEARCH] PRF reranked results: {len(merged)}")
+        
+#         # Apply GloVe reranking if enabled
+#         if enable_glove:
+#             # Check if beta/pool/top_k are provided via query params (for evaluation)
+#             glove_beta_param = request.args.get('glove_beta', None)
+#             glove_pool_param = request.args.get('glove_pool', None)
+#             glove_top_k_param = request.args.get('glove_top_k', None)
+            
+#             if glove_beta_param is not None:
+#                 glove_beta = float(glove_beta_param)
+#             else:
+#                 glove_beta = getattr(config, 'GLOVE_BETA', 0.2)
+            
+#             if glove_pool_param is not None:
+#                 glove_pool = int(glove_pool_param)
+#             else:
+#                 glove_pool = getattr(config, 'GLOVE_CANDIDATE_POOL', 150)
+            
+#             if glove_top_k_param is not None:
+#                 glove_top_k = int(glove_top_k_param)
+#             else:
+#                 glove_top_k = getattr(config, 'GLOVE_TOP_K', 10)
+            
+#             print(f"[SEARCH] Applying GloVe reranking (beta={glove_beta}, pool={glove_pool}, top_k={glove_top_k})...")
+#             merged = engine.rerank_with_glove(
+#                 q_tokens,
+#                 merged,
+#                 beta=glove_beta,
+#                 candidate_pool=glove_pool,
+#                 top_k=glove_top_k,
+#             )
+#             print(f"[SEARCH] GloVe reranked results: {len(merged)}")
+        
+#         # Take final top 100
+#         merged = merged[:100]
+
+#         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
+#         print(f"[SEARCH] Final results: {len(res)}")
+#     except Exception as e:
+#         import traceback
+#         error_msg = f"Error in search: {str(e)}\n{traceback.format_exc()}"
+#         print(f"[SEARCH ERROR] {error_msg}")  # Print to server console
+#         # Return empty results instead of error to avoid crashing
+#         return jsonify(res)  # Return empty list instead of error
+#     # END SOLUTION
+#     return jsonify(res)
+
+
+
 @app.route("/search")
 def search():
-    ''' Returns up to a 100 of your best search results for the query. This is 
-        the place to put forward your best search engine, and you are free to
-        implement the retrieval whoever you'd like within the bound of the 
-        project requirements (efficiency, quality, etc.). That means it is up to
-        you to decide on whether to use stemming, remove stopwords, use 
-        PageRank, query expansion, etc.
-
-        To issue a query navigate to a URL like:
-         http://YOUR_SERVER_DOMAIN/search?query=hello+world
-        where YOUR_SERVER_DOMAIN is something like XXXX-XX-XX-XX-XX.ngrok.io
-        if you're using ngrok on Colab or your external IP on GCP.
-    Returns:
-    --------
-        list of up to 100 search results, ordered from best to worst where each 
-        element is a tuple (wiki_id, title).
-    '''
+    import time
+    t_start = time.time()
+    
     res = []
     query = request.args.get('query', '')
     if len(query) == 0:
       return jsonify(res)
-    # BEGIN SOLUTION
+    
     try:
         print(f"[SEARCH] Query: '{query}'")
         from search_runtime import get_engine
@@ -51,67 +183,80 @@ def search():
             print("[SEARCH] No tokens after tokenization, returning empty results")
             return jsonify(res)
 
-        # Candidates + scores from multiple signals
-        # Run searches in parallel for faster performance (without LSI - LSI will rerank later)
-        print("[SEARCH] Searching all indices in parallel...")
         from concurrent.futures import ThreadPoolExecutor
-        import config
         
-        # Check LSI weight - if 0, skip LSI entirely
-        lsi_weight = getattr(config, 'LSI_WEIGHT', 0.25)
-        use_lsi = engine.body_lsi is not None and lsi_weight > 0
-        
-        # Run body/title/anchor searches in parallel (no LSI search)
+        t0 = time.time()
         max_workers = 3
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_body = executor.submit(engine.search_body_bm25, q_tokens, top_n=300)
             future_title = executor.submit(engine.search_title_count, q_tokens, top_n=6000)
             future_anchor = executor.submit(engine.search_anchor_count, q_tokens, top_n=6000)
             
-            # Wait for all to complete
             body_ranked = future_body.result()
             title_ranked = future_title.result()
             anchor_ranked = future_anchor.result()
+        print(f"[TIME] Search indices: {time.time()-t0:.2f}s")
         
         print(f"[SEARCH] Body results: {len(body_ranked)}")
         print(f"[SEARCH] Title results: {len(title_ranked)}")
         print(f"[SEARCH] Anchor results: {len(anchor_ranked)}")
 
-        print("[SEARCH] Merging signals (without LSI)...")
-        # Merge without LSI first to get initial ranking
+        t0 = time.time()
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
-            lsi_ranked=None,  # No LSI in initial merge
-            top_n=500,  # Get more candidates for reranking
+            top_n=500,
         )
-        print(f"[SEARCH] Merged results (before LSI rerank): {len(merged)}")
+        print(f"[TIME] Merge: {time.time()-t0:.2f}s")
+        print(f"[SEARCH] Merged results (before GloVe): {len(merged)}")
         
-        # Rerank top K with LSI if available and weight > 0
-        if use_lsi:
-            lsi_top_k = getattr(config, 'LSI_TOP_K', 100)
-            print(f"[SEARCH] Reranking top {lsi_top_k} results with LSI...")
-            merged = engine.rerank_with_lsi(
+        # Use ENABLE_GLOVE from config only (no query parameter override)
+        enable_glove = getattr(config, 'ENABLE_GLOVE', False)
+        
+        if enable_glove:
+            t0 = time.time()
+            glove_beta_param = request.args.get('glove_beta', None)
+            glove_pool_param = request.args.get('glove_pool', None)
+            glove_top_k_param = request.args.get('glove_top_k', None)
+            
+            if glove_beta_param is not None:
+                glove_beta = float(glove_beta_param)
+            else:
+                glove_beta = getattr(config, 'GLOVE_BETA', 0.2)
+            
+            if glove_pool_param is not None:
+                glove_pool = int(glove_pool_param)
+            else:
+                glove_pool = getattr(config, 'GLOVE_CANDIDATE_POOL', 150)
+            
+            if glove_top_k_param is not None:
+                glove_top_k = int(glove_top_k_param)
+            else:
+                glove_top_k = getattr(config, 'GLOVE_TOP_K', 10)
+            
+            print(f"[SEARCH] Applying GloVe reranking (beta={glove_beta}, pool={glove_pool}, top_k={glove_top_k})...")
+            merged = engine.rerank_with_glove(
                 q_tokens,
                 merged,
-                top_k=lsi_top_k,
-                lsi_weight=lsi_weight,  # Use LSI weight from config
+                beta=glove_beta,
+                candidate_pool=glove_pool,
+                top_k=glove_top_k,
             )
-            print(f"[SEARCH] Reranked results: {len(merged)}")
+            print(f"[TIME] GloVe: {time.time()-t0:.2f}s")
+            print(f"[SEARCH] GloVe reranked results: {len(merged)}")
         
-        # Take final top 100
         merged = merged[:100]
-
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
         print(f"[SEARCH] Final results: {len(res)}")
+        print(f"[TIME] Total: {time.time()-t_start:.2f}s")
+        
     except Exception as e:
         import traceback
         error_msg = f"Error in search: {str(e)}\n{traceback.format_exc()}"
-        print(f"[SEARCH ERROR] {error_msg}")  # Print to server console
-        # Return empty results instead of error to avoid crashing
-        return jsonify(res)  # Return empty list instead of error
-    # END SOLUTION
+        print(f"[SEARCH ERROR] {error_msg}")
+        return jsonify(res)
+    
     return jsonify(res)
 
 @app.route("/search_body")
@@ -253,49 +398,6 @@ def search_anchor():
     # END SOLUTION
     return jsonify(res)
 
-@app.route("/search_lsi")
-def search_lsi():
-    ''' Returns up to a 100 search results for the query using LSI (Latent Semantic Indexing).
-    
-        To issue a query navigate to a URL like:
-         http://YOUR_SERVER_DOMAIN/search_lsi?query=hello+world
-        where YOUR_SERVER_DOMAIN is something like XXXX-XX-XX-XX-XX.ngrok.io
-        if you're using ngrok on Colab or your external IP on GCP.
-    Returns:
-    --------
-        list of up to 100 search results, ordered from best to worst where each 
-        element is a tuple (wiki_id, title).
-    '''
-    res = []
-    query = request.args.get('query', '')
-    if len(query) == 0:
-      return jsonify(res)
-    # BEGIN SOLUTION
-    try:
-        print(f"[SEARCH_LSI] Query: '{query}'")
-        from search_runtime import get_engine
-        engine = get_engine()
-        
-        if engine.body_lsi is None:
-            print("[SEARCH_LSI] LSI not available, returning empty results")
-            return jsonify(res)
-        
-        q_tokens = engine.tokenize_query(query)
-        print(f"[SEARCH_LSI] Tokenized query: {q_tokens}")
-        if not q_tokens:
-            print("[SEARCH_LSI] No tokens, returning empty results")
-            return jsonify(res)
-        
-        ranked = engine.search_body_lsi(q_tokens, top_n=100)
-        print(f"[SEARCH_LSI] Results: {len(ranked)}")
-        res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in ranked]
-    except Exception as e:
-        import traceback
-        error_msg = f"Error in search_lsi: {str(e)}\n{traceback.format_exc()}"
-        print(f"[SEARCH_LSI ERROR] {error_msg}")
-        return jsonify(res)  # Return empty list instead of error
-    # END SOLUTION
-    return jsonify(res)
 
 @app.route("/search_with_weights")
 def search_with_weights():
@@ -306,12 +408,11 @@ def search_with_weights():
         - body_weight: weight for BM25 body search (default: from config)
         - title_weight: weight for title search (default: from config)
         - anchor_weight: weight for anchor search (default: from config)
-        - lsi_weight: weight for LSI search (default: from config, 0.0 to disable)
         - pagerank_boost: PageRank boost weight (default: from config)
         - pageview_boost: PageView boost weight (default: from config)
         
         Example:
-        http://YOUR_SERVER/search_with_weights?query=hello&body_weight=1.0&title_weight=0.5&lsi_weight=0.0
+        http://YOUR_SERVER/search_with_weights?query=hello&body_weight=1.0&title_weight=0.5
     '''
     res = []
     query = request.args.get('query', '')
@@ -331,11 +432,10 @@ def search_with_weights():
         body_weight = float(request.args.get('body_weight', getattr(config, 'BODY_WEIGHT', 1.0)))
         title_weight = float(request.args.get('title_weight', getattr(config, 'TITLE_WEIGHT', 0.35)))
         anchor_weight = float(request.args.get('anchor_weight', getattr(config, 'ANCHOR_WEIGHT', 0.25)))
-        lsi_weight = float(request.args.get('lsi_weight', getattr(config, 'LSI_WEIGHT', 0.25)))
         pr_boost = float(request.args.get('pagerank_boost', getattr(config, 'PAGERANK_BOOST', 0.15)))
         pv_boost = float(request.args.get('pageview_boost', getattr(config, 'PAGEVIEW_BOOST', 0.10)))
         
-        # Run searches in parallel (without LSI - LSI will rerank later)
+        # Run searches in parallel
         from concurrent.futures import ThreadPoolExecutor
         max_workers = 3
         
@@ -348,34 +448,18 @@ def search_with_weights():
             title_ranked = future_title.result()
             anchor_ranked = future_anchor.result()
         
-        # Merge without LSI first
+        # Merge signals
         merged = engine.merge_signals(
             body_ranked=body_ranked,
             title_ranked=title_ranked,
             anchor_ranked=anchor_ranked,
-            lsi_ranked=None,  # No LSI in initial merge
-            top_n=500,  # Get more candidates for reranking
+            top_n=100,
             body_weight=body_weight,
             title_weight=title_weight,
             anchor_weight=anchor_weight,
-            lsi_weight=0.0,  # No LSI in merge
             pagerank_boost=pr_boost,
             pageview_boost=pv_boost,
         )
-        
-        # Rerank top K with LSI if available and weight > 0
-        use_lsi = engine.body_lsi is not None and lsi_weight > 0
-        if use_lsi:
-            lsi_top_k = getattr(config, 'LSI_TOP_K', 100)
-            merged = engine.rerank_with_lsi(
-                q_tokens,
-                merged,
-                top_k=lsi_top_k,
-                lsi_weight=lsi_weight,  # Use custom LSI weight
-            )
-        
-        # Take final top 100
-        merged = merged[:100]
         
         res = [(doc_id, engine.titles.get(doc_id, "")) for doc_id, _ in merged]
     except Exception as e:
