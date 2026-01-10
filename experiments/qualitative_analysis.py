@@ -14,7 +14,7 @@ if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
 import config
-from experiments.evaluate import load_queries_train, average_precision_at_k
+from experiments.evaluate import load_queries_train, precision_at_k
 
 BASE_URL = "http://104.198.58.119:8080"
 
@@ -60,7 +60,7 @@ def analyze_all_queries(queries, gold):
         titles = {int(doc_id): title for doc_id, title in search_results}
         
         gold_docs = gold.get(query, [])
-        ap10 = average_precision_at_k(doc_ids, gold_docs, k=10)
+        ap10 = precision_at_k(doc_ids, gold_docs, k=10)
         
         results.append({
             'query': query,
