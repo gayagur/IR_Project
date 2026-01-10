@@ -45,8 +45,9 @@
 A complete search pipeline for the English Wikipedia corpus featuring:
 - **Multi-signal ranking** combining text relevance, link analysis, and popularity metrics
 - **BM25 probabilistic ranking** with tuned parameters
+- **GloVe semantic reranking** using document embeddings
 - **6.3M documents** indexed across body, title, and anchor text
-- **Sub-second query latency** with lazy index loading
+- **~2.3s query latency** with lazy index loading
 - **RESTful API** for easy integration
 
 ---
@@ -74,10 +75,10 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 │  │  Body    │ │  Title   │ │  Anchor  │                          │
 │  │  BM25    │ │  Binary  │ │  Binary  │                          │
 │  └──────────┘ └──────────┘ └──────────┘                          │
-│  ┌──────────┐ ┌──────────┐                                       │
-│  │ PageRank │ │ PageView │                                       │
-│  │  Boost   │ │  Boost   │                                       │
-│  └──────────┘ └──────────┘                                       │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │
+│  │ PageRank │ │ PageView │ │  GloVe   │                          │
+│  │  Boost   │ │  Boost   │ │ Rerank   │                          │
+│  └──────────┘ └──────────┘ └──────────┘                          │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -85,7 +86,7 @@ A complete search pipeline for the English Wikipedia corpus featuring:
 │                    GCP Storage (Indices)                         │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐  │
 │  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
-│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, Norms│  │
+│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, GloVe│  │
 │  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -110,6 +111,11 @@ IR_Project/
 │   ├── tfidf_cosine.py       # TF-IDF cosine similarity
 │   └── merge.py              # Score fusion
 │
+├── scripts/
+│   ├── build_forward_index.py      # Build forward index for GloVe
+│   ├── build_glove_doc_embeddings.py # Build GloVe document embeddings
+│   └── tune_glove_hyperparameters.py # GloVe parameter tuning
+│
 └── experiments/
     ├── evaluate.py           # Average Precision@K, Precision, Recall metrics
     ├── run_evaluation.py     # Main evaluation script
@@ -121,7 +127,7 @@ IR_Project/
 ---
 <br/>
 <p align="center">
-  <img src="assets/unnamed.png" width="560" />
+  <img src="assets/build.png" width="560" />
 </p>
 
 
@@ -131,7 +137,7 @@ IR_Project/
 ```bash
 GET /search?query=<query>
 ```
-Multi-signal fusion combining all ranking signals.
+Multi-signal fusion combining all ranking signals + GloVe reranking.
 
 **Response:**
 ```json
@@ -146,7 +152,7 @@ Multi-signal fusion combining all ranking signals.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + PageRank + PageView |
+| `/search` | GET | 🏆 Main engine - BM25 + Title + Anchor + PageRank + PageView + GloVe |
 | `/search_body` | GET | TF-IDF Cosine similarity on article body |
 | `/search_title` | GET | Binary title matching |
 | `/search_anchor` | GET | Binary anchor text search |
@@ -252,20 +258,15 @@ score(D, Q) = number of query terms found in document
 ```
 
 ### Multi-Signal Fusion (`/search` Endpoint)
-```python
-# Step 1: Initial ranking
-initial_score = (
-    body_weight * BM25_body(q, d) +
-    title_weight * binary_title(q, d) +
-    anchor_weight * binary_anchor(q, d)
-)
-
-# Step 2: Add PageRank and PageView boosts (normalized)
-pr_normalized = pagerank(d) / max_pagerank_in_candidates
-pv_normalized = pageviews(d) / max_pageviews_in_candidates
-final_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * pv_normalized
+```
+score(d, q) = w_body · BM25(d, q) + w_title · title(d, q) + w_anchor · anchor(d, q) 
+            + w_pr · log(1 + PR(d)) + w_pv · log(1 + PV(d)) + β · cos(E_q, E_d)
 ```
 
+Where:
+- `E_q` = query embedding (average of top-k document embeddings)
+- `E_d` = document embedding (GloVe weighted average)
+- `β` = GloVe weight (2.7)
 
 **Default Weights:**
 | Signal | Weight | Method |
@@ -275,6 +276,7 @@ final_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * 
 | Anchor | 1.0 | Binary |
 | PageRank | 0.15 | Log boost |
 | PageView | 0.10 | Log boost |
+| GloVe | 2.7 | Cosine similarity |
 
 ---
 
@@ -287,6 +289,8 @@ final_score = initial_score + pagerank_boost * pr_normalized + pageview_boost * 
 | Anchor | 2.4M | 5.8M | ~1.1 GB |
 | PageRank | - | 6.3M | ~50 MB |
 | PageViews | - | 10.7M | ~100 MB |
+| GloVe Embeddings | - | 6.3M | ~2.6 GB |
+| Forward Index | - | 6.3M | ~4.4 GB |
 
 ---
 
@@ -323,13 +327,15 @@ nohup python search_frontend.py > ~/frontend.log 2>&1 &
 
 ## 🔨 Building GloVe Indices
 
-### Building GloVe Document Embeddings
-Build document embeddings using pretrained GloVe vectors:
+### Step 1: Build Forward Index
+```bash
+python scripts/build_forward_index.py --top-m 100
+```
+
+### Step 2: Build GloVe Document Embeddings
 ```bash
 python scripts/build_glove_doc_embeddings.py \
   --glove-path /path/to/glove.6B.300d.txt \
-  --body-index-dir indices/body \
-  --output-path aux/glove_doc_embeddings.pkl \
   --dim 300 \
   --top-m 100
 ```
@@ -337,21 +343,14 @@ python scripts/build_glove_doc_embeddings.py \
 **Note:** Download GloVe vectors from https://nlp.stanford.edu/projects/glove/
 Recommended: `glove.6B.300d.txt` (6B tokens, 300 dimensions)
 
-Options:
-- `--glove-path`: Path to GloVe vectors file (required)
-- `--body-index-dir`: Path to body index directory (default: from config)
-- `--output-path`: Path to save embeddings (default: aux/glove_doc_embeddings.pkl)
-- `--dim`: GloVe vector dimension (default: 300)
-- `--top-m`: Number of top terms to use per document (default: 100)
-
 ### Enabling GloVe
 Edit `config.py`:
 ```python
 # GloVe semantic features configuration
 ENABLE_GLOVE = True  # Enable GloVe reranking
-GLOVE_BETA = 0.2  # GloVe weight: final = base_score + beta * cosine
+GLOVE_BETA = 2.7  # GloVe weight: final = base_score + beta * cosine
 GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
-GLOVE_TOP_K = 10  # Number of top documents to use for query embedding
+GLOVE_TOP_K = 12  # Number of top documents to use for query embedding
 ```
 
 After updating config, restart the server for changes to take effect.
@@ -377,37 +376,21 @@ python experiments/weight_tuning.py --base-url http://<SERVER_IP>:8080
 ```
 Tests hundreds of weight combinations and generates visualization reports.
 
+### GloVe Hyperparameter Tuning
+```bash
+python scripts/tune_glove_hyperparameters.py --server-ip <SERVER_IP>
+```
+Grid search over β (weight) and top-k (documents for query embedding).
+
 ### Version Comparison
 ```bash
 python experiments/compare_versions.py --base-url http://<SERVER_IP>:8080
 ```
 Compares different search engine configurations and generates comparison visualizations.
 
-### Evaluating GloVe Variants
-Compare baseline and GloVe-only configurations:
-
-1. **Baseline (no GloVe)**:
-   ```bash
-   # Set ENABLE_GLOVE = False in config.py
-   # Restart server
-   python scripts/evaluate_variants.py --variant baseline
-   ```
-
-2. **GloVe only**:
-   ```bash
-   # Set ENABLE_GLOVE = True in config.py
-   # Restart server
-   python scripts/evaluate_variants.py --variant glove
-   ```
-
-Results are saved to `experiments/variant_evaluation_results/` with:
-- JSON files for each variant
-- Deltas vs baseline (when baseline exists)
-- Console markdown report
-
 ### Metrics
-- **Average Precision@10** - Average Precision at 10 (average of Precision@10 across queries)
-- **Average Precision@5** - Average Precision at 5 (average of Precision@5 across queries)
+- **Average Precision@10** - Average of Precision@10 across queries
+- **Average Precision@5** - Average of Precision@5 across queries
 - **Precision@5** - Precision at rank 5
 - **F1@30** - F1 score at rank 30
 - **Harmonic Mean** - Combined P@5 and F1@30
@@ -431,6 +414,7 @@ data/
     ├── pagerank.pkl    # PageRank scores (6.3M entries)
     ├── pageviews.pkl   # Page view counts
     ├── titles.pkl      # doc_id → title mapping
+    ├── forward_index.pkl         # Forward index for GloVe
     └── glove_doc_embeddings.pkl  # GloVe document embeddings
 ```
 
@@ -446,8 +430,8 @@ TITLE_INDEX_DIR = "indices/title"
 ANCHOR_INDEX_DIR = "indices/anchor"
 
 # BM25 parameters
-BM25_K1 = 2.5
-BM25_B = 0.0
+BM25_K1 = 3.0
+BM25_B = 0.25
 
 # Ranking weights
 BODY_WEIGHT = 0.4
@@ -457,9 +441,10 @@ PAGERANK_BOOST = 0.15
 PAGEVIEW_BOOST = 0.10
 
 # GloVe semantic features configuration
-ENABLE_GLOVE = False  # Enable GloVe reranking
-GLOVE_BETA = 0.2  # GloVe weight
+ENABLE_GLOVE = True   # Enable GloVe reranking
+GLOVE_BETA = 2.7      # GloVe weight
 GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
+GLOVE_TOP_K = 12      # Top docs for query embedding
 ```
 
 ---
@@ -468,9 +453,10 @@ GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
 
 | Metric | Value |
 |--------|-------|
-| Average Query Latency | ~2.0s |
+| Average Query Latency | ~2.3s |
 | Index Load Time | ~2 min |
-| Memory Usage | ~8 GB |
+| Memory Usage | ~12 GB |
+| Average Precision@10 | 0.723 |
 
 ---
 
@@ -478,7 +464,7 @@ GLOVE_CANDIDATE_POOL = 100  # Candidates to consider
 
 > Replace `<SERVER_IP>` with your instance IP (e.g., `104.198.58.119`)
 ```bash
-# Main search (BM25 + all signals)
+# Main search (BM25 + all signals + GloVe)
 curl "http://<SERVER_IP>:8080/search?query=machine+learning"
 
 # Body search (TF-IDF Cosine)
@@ -501,40 +487,13 @@ curl -X POST "http://<SERVER_IP>:8080/get_pageview" \
   -d '[12345, 67890, 11111]'
 ```
 
-### Live Examples (Current Deployment)
-```bash
-# Main search (BM25 + all signals)
-curl "http://104.198.58.119:8080/search?query=machine+learning"
-
-# Body search (TF-IDF Cosine)
-curl "http://104.198.58.119:8080/search_body?query=artificial+intelligence"
-
-# Title search (Binary)
-curl "http://104.198.58.119:8080/search_title?query=python+programming"
-
-# Anchor search (Binary)
-curl "http://104.198.58.119:8080/search_anchor?query=united+states"
-
-# Custom weights
-curl "http://104.198.58.119:8080/search_with_weights?query=deep+learning&title_weight=3.0&body_weight=0.5&pagerank_boost=0.2&pageview_boost=0.15"
-
-# Get PageRank for documents
-curl -X POST "http://104.198.58.119:8080/get_pagerank" \
-  -H "Content-Type: application/json" \
-  -d '[12345, 67890, 11111]'
-
-# Get PageViews for documents
-curl -X POST "http://104.198.58.119:8080/get_pageview" \
-  -H "Content-Type: application/json" \
-  -d '[12345, 67890, 11111]'
-```
-
 ---
 
 ## 📚 References
 
 - Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*
 - Page, L., et al. (1999). *The PageRank Citation Ranking: Bringing Order to the Web*
+- Pennington, J., Socher, R., & Manning, C. D. (2014). *GloVe: Global Vectors for Word Representation*
 
 ---
 
