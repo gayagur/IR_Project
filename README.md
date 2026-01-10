@@ -38,58 +38,10 @@
 
 ---
 
-
-
-## 📖 Overview
-
-A complete search pipeline for the English Wikipedia corpus featuring:
-- **Multi-signal ranking** combining text relevance, link analysis, and popularity metrics
-- **BM25 probabilistic ranking** with tuned parameters
-- **GloVe semantic reranking** using document embeddings
-- **6.3M documents** indexed across body, title, and anchor text
-- **~2.3s query latency** with lazy index loading
-- **RESTful API** for easy integration
-
----
-
-## 🏗️ Architecture
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         User Query                               │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Flask API (search_frontend.py)                │
-│                                                                  │
-│  /search ─────► Multi-Signal Fusion (BM25 + Title + Anchor)      │
-│  /search_body ─► TF-IDF Cosine on article text                   │
-│  /search_title ► Title matching                                  │
-│  /search_anchor► Anchor text search                              │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Ranking Engine                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │
-│  │  Body    │ │  Title   │ │  Anchor  │                          │
-│  │  BM25    │ │  Binary  │ │  Binary  │                          │
-│  └──────────┘ └──────────┘ └──────────┘                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │
-│  │ PageRank │ │ PageView │ │  GloVe   │                          │
-│  │  Boost   │ │  Boost   │ │ Rerank   │                          │
-│  └──────────┘ └──────────┘ └──────────┘                          │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    GCP Storage (Indices)                         │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐  │
-│  │ Body Index │ │Title Index │ │Anchor Index│ │ Aux Files    │  │
-│  │  28M terms │ │ 1.7M terms │ │ 2.4M terms │ │ PR, PV, GloVe│  │
-│  └────────────┘ └────────────┘ └────────────┘ └──────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
+<br/>
+<p align="center">
+  <img src="assets/build.png" width="560" />
+</p>
 
 ---
 
@@ -127,7 +79,7 @@ IR_Project/
 ---
 <br/>
 <p align="center">
-  <img src="assets/build.png" width="560" />
+  <img src="assets/unnamed.png" width="560" />
 </p>
 
 
