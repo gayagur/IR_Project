@@ -74,8 +74,8 @@ PAGEVIEWS_PATH = (GCS_AUX_DIR + "/pageviews.pkl") if USE_GCS_PATHS else (AUX_DIR
 # BM25 parameters
 # ============================================================================
 # BM25 scoring parameters (tuned for best Average Precision@10 performance)
-BM25_K1 = 2.5  # Term frequency saturation parameter (default: 2.5)
-BM25_B = 0.0   # Document length normalization parameter (default: 0.0, no normalization)
+BM25_K1 = 3.0 # Term frequency saturation parameter (default: 2.5)
+BM25_B = 0.25  # Document length normalization parameter (default: 0.0, no normalization)
 
 # ============================================================================
 # Ranking weights for signal merging
