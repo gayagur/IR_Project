@@ -155,3 +155,22 @@ echo "To SSH into the VM:"
 echo "  gcloud compute ssh ${GOOGLE_ACCOUNT_NAME}@${INSTANCE_NAME} --zone ${ZONE}"
 echo ""
 echo "============================================"
+
+
+
+
+# cd ~/IR_Project
+# source ~/venv/bin/activate
+
+# # Stop server
+# pkill -f search_frontend
+
+# # Download updated files from bucket
+# gsutil -m rsync -r -x '\.git/.*|__pycache__/.*|\.pyc$' gs://matiasgaya333/IR_Project/ ~/IR_Project/
+
+# # Restart server
+# nohup python search_frontend.py > ~/frontend.log 2>&1 &
+
+# # Wait for server to load and check logs
+# sleep 120
+# tail -30 ~/frontend.log

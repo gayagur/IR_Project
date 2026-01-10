@@ -16,7 +16,7 @@ parent_dir = script_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
-from experiments.evaluate import load_queries_train, mean_ap_at_k
+from experiments.evaluate import load_queries_train, average_precision_at_k
 from experiments.run_evaluation import harmonic_mean_precision_f1
 
 try:
@@ -87,8 +87,8 @@ def evaluate_bm25_params(
     
     print()
     
-    map_at_10 = mean_ap_at_k(all_pred, gold, k=10)
-    map_at_5 = mean_ap_at_k(all_pred, gold, k=5)
+    avg_precision_at_10 = average_precision_at_k(all_pred, gold, k=10)
+    avg_precision_at_5 = average_precision_at_k(all_pred, gold, k=5)
     
     harmonic_means = []
     for q in queries:
@@ -100,8 +100,8 @@ def evaluate_bm25_params(
     return {
         'k1': k1,
         'b': b,
-        'map_at_10': map_at_10,
-        'map_at_5': map_at_5,
+        'avg_precision_at_10': avg_precision_at_10,
+        'avg_precision_at_5': avg_precision_at_5,
         'harmonic_mean': sum(harmonic_means) / len(harmonic_means) if harmonic_means else 0,
         'mean_time': sum(times) / len(times) if times else 0,
     }
@@ -133,8 +133,8 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Sort by MAP@10
-    sorted_results = sorted(results, key=lambda x: x['map_at_10'], reverse=True)
+    # Sort by Average Precision@10
+    sorted_results = sorted(results, key=lambda x: x['avg_precision_at_10'], reverse=True)
     
     # =========================================================================
     # 1. Heatmap: k1 vs b
@@ -150,7 +150,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     for r in results:
         k1_idx = k1_vals.index(r['k1'])
         b_idx = b_vals.index(r['b'])
-        heatmap_data[b_idx, k1_idx] = r['map_at_10']
+        heatmap_data[b_idx, k1_idx] = r['avg_precision_at_10']
     
     im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', interpolation='nearest')
     
@@ -160,7 +160,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     ax.set_yticklabels([f'{v:.2f}' for v in b_vals])
     ax.set_xlabel('k1 (Term Frequency Saturation)', fontsize=14, fontweight='bold')
     ax.set_ylabel('b (Document Length Normalization)', fontsize=14, fontweight='bold')
-    ax.set_title('🎯 BM25 Parameter Tuning: MAP@10 Heatmap', fontsize=16, fontweight='bold')
+    ax.set_title('🎯 BM25 Parameter Tuning: Average Precision@10 Heatmap', fontsize=16, fontweight='bold')
     
     # Add value annotations
     for i in range(len(b_vals)):
@@ -177,7 +177,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     ax.add_patch(plt.Rectangle((best_k1_idx - 0.5, best_b_idx - 0.5), 1, 1,
                                 fill=False, edgecolor='gold', linewidth=4))
     
-    plt.colorbar(im, ax=ax, label='MAP@10')
+    plt.colorbar(im, ax=ax, label='Average Precision@10')
     plt.tight_layout()
     plt.savefig(output_dir / 'bm25_heatmap.png', dpi=200, bbox_inches='tight', facecolor='white')
     print(f"  ✓ Saved: {output_dir / 'bm25_heatmap.png'}")
@@ -195,13 +195,13 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     k1_results.sort(key=lambda x: x['k1'])
     
     k1_x = [r['k1'] for r in k1_results]
-    k1_y = [r['map_at_10'] for r in k1_results]
+    k1_y = [r['avg_precision_at_10'] for r in k1_results]
     
     ax.plot(k1_x, k1_y, marker='o', markersize=10, linewidth=2.5, color='#3498db')
     ax.fill_between(k1_x, k1_y, alpha=0.2, color='#3498db')
     ax.axvline(best['k1'], color='gold', linestyle='--', linewidth=2, label=f'Best k1={best["k1"]}')
     ax.set_xlabel('k1', fontsize=12, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_title(f'k1 Sensitivity (b={best_b})', fontsize=14, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -213,13 +213,13 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     b_results.sort(key=lambda x: x['b'])
     
     b_x = [r['b'] for r in b_results]
-    b_y = [r['map_at_10'] for r in b_results]
+    b_y = [r['avg_precision_at_10'] for r in b_results]
     
     ax.plot(b_x, b_y, marker='o', markersize=10, linewidth=2.5, color='#2ecc71')
     ax.fill_between(b_x, b_y, alpha=0.2, color='#2ecc71')
     ax.axvline(best['b'], color='gold', linestyle='--', linewidth=2, label=f'Best b={best["b"]}')
     ax.set_xlabel('b', fontsize=12, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_title(f'b Sensitivity (k1={best_k1})', fontsize=14, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -236,14 +236,14 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     top20 = sorted_results[:20]
     x = np.arange(len(top20))
-    map10_vals = [r['map_at_10'] for r in top20]
+    map10_vals = [r['avg_precision_at_10'] for r in top20]
     labels = [f'k1={r["k1"]}\nb={r["b"]}' for r in top20]
     
     colors = ['#FFD700' if i < 3 else '#C0C0C0' if i < 7 else '#3498db' for i in range(len(top20))]
     bars = ax.bar(x, map10_vals, color=colors, edgecolor='white', linewidth=0.5)
     
     ax.set_xlabel('Configuration', fontsize=12, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_title('🏆 Top 20 BM25 Parameter Combinations', fontsize=16, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
@@ -276,16 +276,16 @@ def create_visualizations(results: List[Dict], output_dir: Path):
         "",
         "📈 PERFORMANCE:",
         "─" * 35,
-        f"  • MAP@10:        {best['map_at_10']:.4f}",
-        f"  • MAP@5:         {best['map_at_5']:.4f}",
+        f"  • Average Precision@10:        {best['avg_precision_at_10']:.4f}",
+        f"  • Average Precision@5:         {best['avg_precision_at_5']:.4f}",
         f"  • Harmonic Mean: {best['harmonic_mean']:.4f}",
         f"  • Query Time:    {best['mean_time']:.2f}s",
         "",
         "📉 RANGE:",
         "─" * 35,
-        f"  • Best:  {max(r['map_at_10'] for r in results):.4f}",
-        f"  • Worst: {min(r['map_at_10'] for r in results):.4f}",
-        f"  • Mean:  {np.mean([r['map_at_10'] for r in results]):.4f}",
+        f"  • Best:  {max(r['avg_precision_at_10'] for r in results):.4f}",
+        f"  • Worst: {min(r['avg_precision_at_10'] for r in results):.4f}",
+        f"  • Mean:  {np.mean([r['avg_precision_at_10'] for r in results]):.4f}",
         "",
         "💡 INTERPRETATION:",
         "─" * 35,
@@ -357,12 +357,12 @@ def main():
         try:
             metrics = evaluate_bm25_params(args.base_url, queries, gold, k1, b)
             results.append(metrics)
-            print(f"  ✅ MAP@10: {metrics['map_at_10']:.4f}")
+            print(f"  ✅ Avg P@10: {metrics['avg_precision_at_10']:.4f}")
         except Exception as e:
             print(f"  ❌ Error: {e}")
     
     # Sort
-    results.sort(key=lambda x: x['map_at_10'], reverse=True)
+    results.sort(key=lambda x: x['avg_precision_at_10'], reverse=True)
     
     # Save
     output_dir = Path(args.output_dir)
@@ -379,12 +379,12 @@ def main():
     print("\n" + "=" * 60)
     print("🏆 TOP 10 BM25 CONFIGURATIONS:")
     print("=" * 60)
-    print(f"{'Rank':<5} {'k1':<6} {'b':<6} {'MAP@10':<10}")
+    print(f"{'Rank':<5} {'k1':<6} {'b':<6} {'Avg P@10':<12}")
     print("-" * 30)
     
     for i, r in enumerate(results[:10], 1):
         medal = '🥇' if i == 1 else '🥈' if i == 2 else '🥉' if i == 3 else f'{i}.'
-        print(f"{medal:<5} {r['k1']:<6.2f} {r['b']:<6.2f} {r['map_at_10']:.4f}")
+        print(f"{medal:<5} {r['k1']:<6.2f} {r['b']:<6.2f} {r['avg_precision_at_10']:.4f}")
     
     print(f"\n✅ Results saved to: {output_dir}")
     print(f"⏱️ Total time: {(time.time() - start_time)/60:.1f} minutes")

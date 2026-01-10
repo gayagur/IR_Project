@@ -578,7 +578,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dump", required=True, help="XML .bz2, parquet file/dir, or gs://... parquet path")
-    parser.add_argument("--build", choices=["body", "title", "anchor", "pageviews", "pagerank", "lsi", "all"], default="all")
+    parser.add_argument("--build", choices=["body", "title", "anchor", "pageviews", "pagerank", "all"], default="all")
     parser.add_argument("--parquet", action="store_true", help="Force parquet mode")
     args = parser.parse_args()
 
@@ -595,52 +595,6 @@ if __name__ == "__main__":
         build_pageviews(args.dump)
     if args.build == "pagerank":
         build_pagerank(args.dump, is_parquet=is_parquet)
-    if args.build == "lsi":
-        # LSI requires body index and doc_norms to be built first
-        print("\n" + "=" * 60)
-        print("Building LSI index...")
-        print("=" * 60)
-        from ranking.lsi import build_lsi_index
-        
-        # Load body index and doc_norms
-        bucket_name = config.BUCKET_NAME if config.WRITE_TO_GCS else None
-        body_index = InvertedIndex.read_index(str(config.BODY_INDEX_DIR), "body", bucket_name=bucket_name)
-        
-        # Load doc_norms
-        doc_norms_path = _as_path(config.DOC_NORMS_PATH)
-        if bucket_name:
-            from google.cloud import storage
-            from inverted_index_gcp import get_bucket
-            gcs_bucket = get_bucket(bucket_name)
-            blob = gcs_bucket.blob(str(doc_norms_path))
-            if not blob.exists():
-                print("Error: doc_norms.pkl not found. Please build body index first.")
-                sys.exit(1)
-            import tempfile
-            temp_path = Path(tempfile.mktemp(suffix='.pkl'))
-            blob.download_to_filename(str(temp_path))
-            with open(temp_path, 'rb') as f:
-                doc_norms = pickle.load(f)
-            temp_path.unlink()
-        else:
-            if not doc_norms_path.exists():
-                print("Error: doc_norms.pkl not found. Please build body index first.")
-                sys.exit(1)
-            with open(doc_norms_path, 'rb') as f:
-                doc_norms = pickle.load(f)
-        
-        # Build LSI index
-        output_dir = _as_path(config.LSI_DIR)
-        build_lsi_index(
-            body_index=body_index,
-            body_index_dir=str(config.BODY_INDEX_DIR),
-            doc_norms=doc_norms,
-            output_dir=output_dir,
-            n_components=config.LSI_N_COMPONENTS,
-            max_terms=config.LSI_MAX_TERMS,
-            max_docs=config.LSI_MAX_DOCS,
-        )
-        print("✓ LSI index built successfully")
     if args.build == "all":
         # Build pageviews and pagerank as part of "all"
         print("\n" + "=" * 60)

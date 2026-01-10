@@ -5,30 +5,47 @@ import json
 from typing import Dict, List, Tuple
 
 
-def average_precision_at_k(pred: List[int], gold: List[int], k: int = 10) -> float:
+def precision_at_k(pred: List[int], gold: List[int], k: int) -> float:
     """
-    gold: ranked list of relevant docs (as provided), we treat all as relevant set.
+    Precision@K for a single query.
+    
+    Formula: (number of relevant docs in top K) / K
     """
-    if not gold:
+    if k <= 0:
         return 0.0
+    pred_at_k = pred[:k]
     gold_set = set(gold)
-    pred_k = pred[:k]
-
-    hits = 0
-    sum_prec = 0.0
-    for i, doc_id in enumerate(pred_k, start=1):
-        if doc_id in gold_set:
-            hits += 1
-            sum_prec += hits / i
-    return sum_prec / min(len(gold_set), k)
+    relevant_in_top_k = sum(1 for doc in pred_at_k if doc in gold_set)
+    return relevant_in_top_k / k
 
 
+def average_precision_at_k(
+    all_predictions: Dict[str, List[int]], 
+    gold: Dict[str, List[int]], 
+    k: int
+) -> float:
+    """
+    Average Precision@K across all queries.
+    
+    For each query: compute Precision@K = (relevant in top K) / K
+    Then average across all queries.
+    """
+    precisions = []
+    for query, pred in all_predictions.items():
+        gold_list = gold.get(query, [])
+        p_at_k = precision_at_k(pred, gold_list, k)
+        precisions.append(p_at_k)
+    
+    return sum(precisions) / len(precisions) if precisions else 0.0
+
+
+# Backward compatibility alias
 def mean_ap_at_k(all_pred: Dict[str, List[int]], all_gold: Dict[str, List[int]], k: int = 10) -> float:
-    aps = []
-    for q, pred in all_pred.items():
-        gold = all_gold.get(q, [])
-        aps.append(average_precision_at_k(pred, gold, k=k))
-    return sum(aps) / max(1, len(aps))
+    """
+    Alias for average_precision_at_k (for backward compatibility).
+    Note: This is NOT Mean Average Precision (position-aware), but Average Precision@K.
+    """
+    return average_precision_at_k(all_pred, all_gold, k)
 
 
 def load_queries_train(path: str) -> Tuple[List[str], Dict[str, List[int]]]:

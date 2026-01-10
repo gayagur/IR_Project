@@ -15,7 +15,7 @@ parent_dir = script_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
-from experiments.evaluate import load_queries_train, mean_ap_at_k
+from experiments.evaluate import load_queries_train, average_precision_at_k
 from experiments.run_evaluation import (
     harmonic_mean_precision_f1,
     precision_at_k,
@@ -47,7 +47,7 @@ def generate_weight_combinations():
     # =========================================================================
     # SECTION 2: Title/Anchor dominant (body low)
     # =========================================================================
-    for body_w in [0.0, 0.1, 0.2, 0.3]:
+            for body_w in [0.0, 0.1, 0.2, 0.3]:
         for title_w in [0.75, 1.0, 1.5, 2.0, 2.5]:
             for anchor_w in [0.5, 0.75, 1.0, 1.5]:
                 combinations.append({
@@ -152,10 +152,10 @@ def generate_weight_combinations():
             'body_weight': 0.0, 'title_weight': 1.0, 'anchor_weight': 0.5,
             'lsi_weight': lsi_w, 'pagerank_boost': 0.15, 'pageview_boost': 0.1,
         })
-        combinations.append({
+                combinations.append({
             'body_weight': 0.3, 'title_weight': 0.5, 'anchor_weight': 0.5,
             'lsi_weight': lsi_w, 'pagerank_boost': 0.15, 'pageview_boost': 0.1,
-        })
+                })
     
     # Remove duplicates
     seen = set()
@@ -202,8 +202,8 @@ def test_weights(queries, gold):
             print(f"  {i}/{len(queries)}", end='\r')
         
         # Calculate metrics
-        map10 = mean_ap_at_k(all_pred, gold, k=10)
-        map5 = mean_ap_at_k(all_pred, gold, k=5)
+        avg_precision_at_10 = average_precision_at_k(all_pred, gold, k=10)
+        avg_precision_at_5 = average_precision_at_k(all_pred, gold, k=5)
         
         harmonic_means = []
         precisions_5 = []
@@ -224,18 +224,18 @@ def test_weights(queries, gold):
         
         results.append({
             'weights': weights,
-            'map_at_10': map10,
-            'map_at_5': map5,
+            'avg_precision_at_10': avg_precision_at_10,
+            'avg_precision_at_5': avg_precision_at_5,
             'harmonic_mean': avg_hm,
             'precision_at_5': avg_p5,
             'f1_at_30': avg_f1_30,
             'avg_time': avg_time,
         })
         
-        print(f"  MAP@10={map10:.4f}, HM={avg_hm:.4f}, Time={avg_time:.2f}s")
+        print(f"  Avg P@10={avg_precision_at_10:.4f}, HM={avg_hm:.4f}, Time={avg_time:.2f}s")
     
-    # Sort by MAP@10
-    results.sort(key=lambda x: x['map_at_10'], reverse=True)
+    # Sort by Average Precision@10
+    results.sort(key=lambda x: x['avg_precision_at_10'], reverse=True)
     
     return results
 
@@ -247,13 +247,13 @@ def create_visualizations(results: List[Dict], output_dir: Path):
         import numpy as np
     except ImportError:
         print("matplotlib not available")
-        return
+            return
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
     COLORS = {
         'gold': '#FFD700',
-        'silver': '#C0C0C0',
+        'silver': '#C0C0C0', 
         'bronze': '#CD7F32',
         'blue': '#3498db',
         'green': '#2ecc71',
@@ -270,14 +270,14 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     top20 = results[:20]
     x = np.arange(len(top20))
-    map10_vals = [r['map_at_10'] for r in top20]
+    map10_vals = [r['avg_precision_at_10'] for r in top20]
     
     colors = [COLORS['gold'] if i == 0 else COLORS['silver'] if i == 1 else COLORS['bronze'] if i == 2 else COLORS['blue'] for i in range(len(top20))]
     bars = ax.bar(x, map10_vals, color=colors, edgecolor='white', linewidth=1)
     
     ax.set_xlabel('Configuration Rank', fontsize=12, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
-    ax.set_title('Top 20 Weight Configurations by MAP@10', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
+    ax.set_title('Top 20 Weight Configurations by Average Precision@10', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels([f'#{i+1}' for i in range(len(top20))], rotation=45, ha='right')
     ax.set_ylim(min(map10_vals) * 0.9, max(map10_vals) * 1.05)
@@ -297,21 +297,21 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     # =========================================================================
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    map10_all = [r['map_at_10'] for r in results]
+    map10_all = [r['avg_precision_at_10'] for r in results]
     hm_all = [r['harmonic_mean'] for r in results]
     
     scatter = ax.scatter(map10_all, hm_all, c=map10_all, cmap='viridis', s=80, alpha=0.6, edgecolors='white', linewidth=0.5)
     
     # Highlight top 5
     for i in range(min(5, len(results))):
-        ax.scatter([results[i]['map_at_10']], [results[i]['harmonic_mean']], 
+        ax.scatter([results[i]['avg_precision_at_10']], [results[i]['harmonic_mean']], 
                   c='red', s=200, marker='*', zorder=10, edgecolors='white')
     
-    ax.set_xlabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_ylabel('Harmonic Mean (P@5, F1@30)', fontsize=12, fontweight='bold')
-    ax.set_title('MAP@10 vs Harmonic Mean (Top 5 marked with stars)', fontsize=14, fontweight='bold')
+    ax.set_title('Average Precision@10 vs Harmonic Mean (Top 5 marked with stars)', fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3)
-    plt.colorbar(scatter, ax=ax, label='MAP@10')
+    plt.colorbar(scatter, ax=ax, label='Avg P@10')
     
     plt.tight_layout()
     plt.savefig(output_dir / 'weight_tuning_map_vs_hm.png', dpi=200, bbox_inches='tight', facecolor='white')
@@ -337,7 +337,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
             val = round(r['weights'].get(param, 0.0), 2)
             if val not in param_values:
                 param_values[val] = []
-            param_values[val].append(r['map_at_10'])
+            param_values[val].append(r['avg_precision_at_10'])
         
         if param_values:
             sorted_vals = sorted(param_values.keys())
@@ -360,7 +360,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
                            xytext=(0, 10), ha='center', fontsize=7, alpha=0.7)
         
         ax.set_xlabel(f'{label} Weight', fontsize=11, fontweight='bold')
-        ax.set_ylabel('Mean MAP@10', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Mean Average Precision@10', fontsize=11, fontweight='bold')
         ax.set_title(f'{label} Sensitivity', fontsize=12, fontweight='bold')
         ax.grid(True, alpha=0.3)
     
@@ -375,17 +375,17 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     fig, ax = plt.subplots(figsize=(14, 8))
     
     top10 = results[:10]
-    metrics = ['MAP@10', 'MAP@5', 'P@5', 'F1@30', 'HM']
+    metrics = ['Avg P@10', 'Avg P@5', 'P@5', 'F1@30', 'HM']
     x = np.arange(len(top10))
     width = 0.15
     
     metric_colors = [COLORS['blue'], COLORS['green'], COLORS['orange'], COLORS['purple'], COLORS['red']]
     
     for i, (metric_name, color) in enumerate(zip(metrics, metric_colors)):
-        if metric_name == 'MAP@10':
-            vals = [r['map_at_10'] for r in top10]
-        elif metric_name == 'MAP@5':
-            vals = [r['map_at_5'] for r in top10]
+        if metric_name == 'Avg P@10':
+            vals = [r['avg_precision_at_10'] for r in top10]
+        elif metric_name == 'Avg P@5':
+            vals = [r['avg_precision_at_5'] for r in top10]
         elif metric_name == 'P@5':
             vals = [r['precision_at_5'] for r in top10]
         elif metric_name == 'F1@30':
@@ -416,8 +416,8 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     # 5a. With vs Without LSI
     ax = axes[0]
-    with_lsi = [r['map_at_10'] for r in results if r['weights'].get('lsi_weight', 0) > 0]
-    without_lsi = [r['map_at_10'] for r in results if r['weights'].get('lsi_weight', 0) == 0]
+    with_lsi = [r['avg_precision_at_10'] for r in results if r['weights'].get('lsi_weight', 0) > 0]
+    without_lsi = [r['avg_precision_at_10'] for r in results if r['weights'].get('lsi_weight', 0) == 0]
     
     if with_lsi and without_lsi:
         bp = ax.boxplot([without_lsi, with_lsi], labels=['No LSI', 'With LSI'], patch_artist=True)
@@ -426,13 +426,13 @@ def create_visualizations(results: List[Dict], output_dir: Path):
         for box in bp['boxes']:
             box.set_alpha(0.6)
     
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_title('LSI vs No LSI Performance', fontsize=13, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='y')
     
-    # 5b. LSI weight vs MAP@10
+    # 5b. LSI weight vs Average Precision@10
     ax = axes[1]
-    lsi_results = [(r['weights'].get('lsi_weight', 0), r['map_at_10']) for r in results]
+    lsi_results = [(r['weights'].get('lsi_weight', 0), r['avg_precision_at_10']) for r in results]
     lsi_weights = [x[0] for x in lsi_results]
     lsi_maps = [x[1] for x in lsi_results]
     
@@ -447,7 +447,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
         ax.legend()
     
     ax.set_xlabel('LSI Weight', fontsize=12, fontweight='bold')
-    ax.set_ylabel('MAP@10', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Precision@10', fontsize=12, fontweight='bold')
     ax.set_title('LSI Weight vs Performance', fontsize=13, fontweight='bold')
     ax.grid(True, alpha=0.3)
     
@@ -514,8 +514,8 @@ def create_visualizations(results: List[Dict], output_dir: Path):
       PageView: {w.get('pageview_boost', 0):.2f}
     
     Performance:
-      MAP@10:        {best['map_at_10']:.4f}
-      MAP@5:         {best['map_at_5']:.4f}
+      Average Precision@10:        {best['avg_precision_at_10']:.4f}
+      Average Precision@5:         {best['avg_precision_at_5']:.4f}
       Precision@5:   {best['precision_at_5']:.4f}
       F1@30:         {best['f1_at_30']:.4f}
       Harmonic Mean: {best['harmonic_mean']:.4f}
@@ -524,10 +524,10 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     ------------------------------------------------------------
     PERFORMANCE RANGE:
     ------------------------------------------------------------
-      Best MAP@10:  {max(r['map_at_10'] for r in results):.4f}
-      Worst MAP@10: {min(r['map_at_10'] for r in results):.4f}
-      Mean MAP@10:  {np.mean([r['map_at_10'] for r in results]):.4f}
-      Std MAP@10:   {np.std([r['map_at_10'] for r in results]):.4f}
+      Best Avg P@10:  {max(r['avg_precision_at_10'] for r in results):.4f}
+      Worst Avg P@10: {min(r['avg_precision_at_10'] for r in results):.4f}
+      Mean Avg P@10:  {np.mean([r['avg_precision_at_10'] for r in results]):.4f}
+      Std Avg P@10:   {np.std([r['avg_precision_at_10'] for r in results]):.4f}
     
     ------------------------------------------------------------
     TOP 5 CONFIGURATIONS:
@@ -536,7 +536,7 @@ def create_visualizations(results: List[Dict], output_dir: Path):
     
     for i, r in enumerate(results[:5], 1):
         rw = r['weights']
-        summary_text += f"    #{i}: MAP@10={r['map_at_10']:.4f} | b={rw.get('body_weight',0):.1f} t={rw.get('title_weight',0):.1f} a={rw.get('anchor_weight',0):.2f} lsi={rw.get('lsi_weight',0):.1f}\n"
+        summary_text += f"    #{i}: Avg P@10={r['avg_precision_at_10']:.4f} | b={rw.get('body_weight',0):.1f} t={rw.get('title_weight',0):.1f} a={rw.get('anchor_weight',0):.2f} lsi={rw.get('lsi_weight',0):.1f}\n"
     
     summary_text += """
     ============================================================
@@ -591,15 +591,15 @@ def main():
     
     # Print summary
     print("\n" + "="*120)
-    print("TOP 20 RESULTS (sorted by MAP@10):")
+    print("TOP 20 RESULTS (sorted by Average Precision@10):")
     print("="*120)
-    print(f"{'Rank':<6} {'MAP@10':<10} {'HM':<10} {'P@5':<10} {'F1@30':<10} {'Time':<8} {'Weights'}")
+    print(f"{'Rank':<6} {'Avg P@10':<12} {'HM':<10} {'P@5':<10} {'F1@30':<10} {'Time':<8} {'Weights'}")
     print("-"*120)
     
     for i, r in enumerate(results[:20], 1):
         w = r['weights']
         marker = " <--BEST" if i == 1 else ""
-        print(f"{i:<6} {r['map_at_10']:.4f}     {r['harmonic_mean']:.4f}     {r['precision_at_5']:.4f}     {r['f1_at_30']:.4f}     {r['avg_time']:.2f}s   "
+        print(f"{i:<6} {r['avg_precision_at_10']:.4f}     {r['harmonic_mean']:.4f}     {r['precision_at_5']:.4f}     {r['f1_at_30']:.4f}     {r['avg_time']:.2f}s   "
               f"body={w.get('body_weight',0):.2f} title={w.get('title_weight',0):.2f} anchor={w.get('anchor_weight',0):.2f} "
               f"lsi={w.get('lsi_weight',0):.2f} pr={w.get('pagerank_boost',0):.2f} pv={w.get('pageview_boost',0):.2f}{marker}")
     
