@@ -26,7 +26,7 @@
 
 <br/>
 <p align="center">
-  <img src="assets/team.png" width="260" />
+  <img src="assets/team2.png" width="260" />
 </p>
 
 
@@ -92,6 +92,23 @@ IR_Project/
 <br/>
 <p align="center">
   <img src="assets/unnamed.png" width="560" />
+</p>
+
+---
+
+## 🖥️ UI (Web Interface)
+
+A lightweight web UI is included for interactive querying and quick inspection of results.
+The UI connects directly to the Flask backend running on:
+
+**http://104.198.58.119:8082**
+
+The backend serves the same search endpoints described above and does not modify
+the ranking logic—only provides a convenient web-based interface.
+
+<br/>
+<p align="center">
+  <img src="assets/ui.png" width="900" />
 </p>
 
 
@@ -412,7 +429,7 @@ GLOVE_TOP_K = 12      # Top docs for query embedding
 
 | Metric | Value |
 |--------|-------|
-| Average Query Latency | ~2.3s |
+| Average Query Latency | ~1.4s |
 | Index Load Time | ~2 min |
 | Memory Usage | ~12 GB |
 | Average Precision@10 | 0.723 |
