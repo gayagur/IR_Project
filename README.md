@@ -1,3 +1,4 @@
+
 # 🔍 Wikipedia Search Engine
 
 > **Information Retrieval Course Project** | A high-performance full-text search engine for English Wikipedia (6.3M articles)
@@ -16,17 +17,18 @@
 
   <tr>
     <td align="center">
-      <img src="https://img.shields.io/badge/%20%20👑%20%20Gaya%20Gur%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Gaya Gur"/>
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Gaya%20Gur%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="200" alt="Gaya Gur"/>
     </td>
     <td align="center">
-      <img src="https://img.shields.io/badge/%20%20👑%20%20Matias%20Guernik%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="100" alt="Matias Guernik"/>
+      <img src="https://img.shields.io/badge/%20%20👑%20%20Matias%20Guernik%20%20👑%20%20-800020?style=for-the-badge&labelColor=800020" height="200" alt="Matias Guernik"/>
     </td>
   </tr>
 
-
 <br/>
 <p align="center">
-  <img src="assets/team2.png" width="260" />
+  <img src="assets/team2.png" width="400" style="vertical-align: middle;" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/ui.gif" width="400" style="vertical-align: middle;" />
 </p>
 
 
