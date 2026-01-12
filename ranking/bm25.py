@@ -36,54 +36,41 @@ class BM25FromIndex:
         return math.log((self.N - df + 0.5) / (df + 0.5) + 1)
 
     def search(
-        self, 
-        query_tokens: List[str], 
-        *, 
-        top_n: int = 100, 
-        max_terms: int = 50,
-        k1: float | None = None,
-        b: float | None = None,
+        self,
+        q_tokens: List[str],
+        *,
+        top_n: int = 100,
+        k1: float = 2.5,
+        b: float = 0.0,
     ) -> List[Tuple[int, float]]:
-        """
-        Search using BM25 scoring.
+        from concurrent.futures import ThreadPoolExecutor
         
-        Args:
-            query_tokens: List of query terms
-            top_n: Number of top results to return
-            max_terms: Maximum number of query terms to use
-            k1: Term frequency saturation parameter (default: uses instance k1)
-            b: Document length normalization parameter (default: uses instance b)
-            
-        Returns:
-            List of (doc_id, score) tuples, sorted by score descending
-        """
-        if not query_tokens:
+        scores: Dict[int, float] = {}
+        unique_terms = [t for t in set(q_tokens) if t in self.index.df]
+        
+        if not unique_terms:
             return []
-
-        # Use provided k1 and b, or fall back to instance defaults
-        k1_val = k1 if k1 is not None else self.k1
-        b_val = b if b is not None else self.b
-
-        q = query_tokens[:max_terms]
-        q_terms = list(dict.fromkeys(q))  # unique, keeps order
-
-        scores = defaultdict(float)
-        for term in q_terms:
-            df = self.index.df.get(term)
-            if df is None:
-                continue
+        
+        def process_term(term):
+            df = self.index.df[term]
             idf = self._idf(df)
-            pls = self.index.read_a_posting_list(self.index_dir, term, bucket_name=self.bucket_name)
-
-            for doc_id, tf in pls:
-                dl = self.doc_len.get(doc_id, 0)
-                if dl == 0:
-                    continue
-                # BM25 formula with custom k1 and b
-                denom = tf + k1_val * (1 - b_val + b_val * (dl / self.avgdl))
-                score = idf * (tf * (k1_val + 1)) / denom
-                scores[doc_id] += score
-
-        res = list(scores.items())
-        res.sort(key=lambda x: x[1], reverse=True)
-        return res[:top_n]
+            posting_list = self.index.read_a_posting_list(
+                self.index_dir, term, bucket_name=self.bucket_name
+            )
+            return idf, posting_list
+        
+        # Read posting lists in parallel
+        with ThreadPoolExecutor(max_workers=min(len(unique_terms), 4)) as executor:
+            results = list(executor.map(process_term, unique_terms))
+        
+        # Score documents
+        for idf, posting_list in results:
+            for doc_id, tf in posting_list:
+                doc_id = int(doc_id)
+                dl = self.doc_len.get(doc_id, self.avgdl)
+                tf_component = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / self.avgdl))
+                score = idf * tf_component
+                scores[doc_id] = scores.get(doc_id, 0.0) + score
+        
+        ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
+        return ranked[:top_n] if top_n else ranked

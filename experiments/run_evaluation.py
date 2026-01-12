@@ -29,16 +29,8 @@ from experiments.evaluate import (
 BASE_URL = "http://104.198.58.119:8080"
 
 # ============================================================
-# BEST WEIGHTS - EDIT HERE
+# CONFIGURATION
 # ============================================================
-WEIGHTS = {
-    'body': 0.4,
-    'title': 0.75,
-    'anchor': 1.0,
-    'pagerank': 0.15,
-    'pageview': 0.1,
-}
-
 NUM_QUERIES = 32  # How many queries to test
 # ============================================================
 
@@ -199,19 +191,14 @@ def harmonic_mean(a: float, b: float) -> float:
     return 2 * a * b / (a + b)
 
 
-def query_with_weights(query: str, weights: Dict[str, float]) -> Tuple[List[int], float]:
-    """Query the search engine with custom weights."""
+def query_search(query: str) -> Tuple[List[int], float]:
+    """Query the search engine using the default /search endpoint."""
     
     params = {
         'query': query,
-        'body_weight': weights.get('body', 1.0),
-        'title_weight': weights.get('title', 0.35),
-        'anchor_weight': weights.get('anchor', 0.25),
-        'pagerank_boost': weights.get('pagerank', 0.15),
-        'pageview_boost': weights.get('pageview', 0.10),
     }
     
-    url = f"{BASE_URL}/search_with_weights"
+    url = f"{BASE_URL}/search"
     start_time = time.time()
     
     try:
@@ -249,19 +236,17 @@ def main():
         print("Cannot connect to server")
         return
     
-    # Use configured weights and number of queries
+    # Use configured number of queries
     test_queries = queries[:NUM_QUERIES]
     
-    print(f"\nEvaluating on {len(test_queries)} queries:")
-    print(f"  body={WEIGHTS['body']}, title={WEIGHTS['title']}, anchor={WEIGHTS['anchor']}")
-    print(f"  pagerank={WEIGHTS['pagerank']}, pageview={WEIGHTS['pageview']}")
+    print(f"\nEvaluating on {len(test_queries)} queries using /search endpoint")
     print("-" * 60)
     
     all_pred = {}
     times = []
     
     for i, query in enumerate(test_queries, 1):
-        doc_ids, elapsed = query_with_weights(query, WEIGHTS)
+        doc_ids, elapsed = query_search(query)
         all_pred[query] = doc_ids
         times.append(elapsed)
         print(f"  [{i}/{len(test_queries)}] {elapsed:.2f}s - {query[:50]}", end='\r')
@@ -297,13 +282,6 @@ def main():
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS")
     print("=" * 60)
-    
-    print("\nWeights:")
-    print(f"  body:     {WEIGHTS['body']:.2f}")
-    print(f"  title:    {WEIGHTS['title']:.2f}")
-    print(f"  anchor:   {WEIGHTS['anchor']:.2f}")
-    print(f"  pagerank: {WEIGHTS['pagerank']:.2f}")
-    print(f"  pageview: {WEIGHTS['pageview']:.2f}")
     
     print(f"\nQueries tested: {len(test_queries)}")
     
