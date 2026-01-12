@@ -427,12 +427,10 @@ GLOVE_TOP_K = 12      # Top docs for query embedding
 
 ## 📊 Performance
 
-| Metric | Value |
-|--------|-------|
-| Average Query Latency | ~1.4s |
-| Index Load Time | ~2 min |
-| Memory Usage | ~12 GB |
-| Average Precision@10 | 0.723 |
+<br/>
+<p align="center">
+  <img src="assets/performence.png" width="400" />
+</p>
 
 ---
 
