@@ -36,41 +36,56 @@ class BM25FromIndex:
         return math.log((self.N - df + 0.5) / (df + 0.5) + 1)
 
     def search(
-        self,
-        q_tokens: List[str],
-        *,
-        top_n: int = 100,
-        k1: float = 2.5,
-        b: float = 0.0,
+        self, 
+        query_tokens: List[str], 
+        *, 
+        top_n: int = 100, 
+        max_terms: int = 50,
+        k1: float | None = None,
+        b: float | None = None,
     ) -> List[Tuple[int, float]]:
+        """
+        Search using BM25 scoring.
+        """
         from concurrent.futures import ThreadPoolExecutor
         
-        scores: Dict[int, float] = {}
-        unique_terms = [t for t in set(q_tokens) if t in self.index.df]
-        
-        if not unique_terms:
+        if not query_tokens:
             return []
-        
+
+        k1_val = k1 if k1 is not None else self.k1
+        b_val = b if b is not None else self.b
+
+        q = query_tokens[:max_terms]
+        q_terms = list(dict.fromkeys(q))  # unique, keeps order
+
         def process_term(term):
-            df = self.index.df[term]
+            df = self.index.df.get(term)
+            if df is None:
+                return None
             idf = self._idf(df)
-            posting_list = self.index.read_a_posting_list(
-                self.index_dir, term, bucket_name=self.bucket_name
-            )
-            return idf, posting_list
-        
+            pls = self.index.read_a_posting_list(self.index_dir, term, bucket_name=self.bucket_name)
+            # Limit very large posting lists
+            if len(pls) > 200000:
+                pls = pls[:200000]
+            return idf, pls
+
         # Read posting lists in parallel
-        with ThreadPoolExecutor(max_workers=min(len(unique_terms), 4)) as executor:
-            results = list(executor.map(process_term, unique_terms))
-        
-        # Score documents
-        for idf, posting_list in results:
-            for doc_id, tf in posting_list:
-                doc_id = int(doc_id)
-                dl = self.doc_len.get(doc_id, self.avgdl)
-                tf_component = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / self.avgdl))
-                score = idf * tf_component
-                scores[doc_id] = scores.get(doc_id, 0.0) + score
-        
-        ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
-        return ranked[:top_n] if top_n else ranked
+        with ThreadPoolExecutor(max_workers=min(len(q_terms), 4)) as executor:
+            results = list(executor.map(process_term, q_terms))
+
+        scores = defaultdict(float)
+        for result in results:
+            if result is None:
+                continue
+            idf, pls = result
+            for doc_id, tf in pls:
+                dl = self.doc_len.get(doc_id, 0)
+                if dl == 0:
+                    continue
+                denom = tf + k1_val * (1 - b_val + b_val * (dl / self.avgdl))
+                score = idf * (tf * (k1_val + 1)) / denom
+                scores[doc_id] += score
+
+        res = list(scores.items())
+        res.sort(key=lambda x: x[1], reverse=True)
+        return res[:top_n]
